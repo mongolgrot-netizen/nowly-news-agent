@@ -1012,6 +1012,20 @@ def handle_update(u):
                 "text": "📅 ЭТОТ ДЕНЬ В ИСТОРИИ\n\nВыбери охват:",
                 "reply_markup": json.dumps({"keyboard": history_scope_keyboard(), "resize_keyboard": True}, ensure_ascii=False)
             })
+        elif text == "🇷🇺 Россия":
+            HISTORY_MODE[chat] = ("russia", None)
+            tg("sendMessage", {
+                "chat_id": chat,
+                "text": "🇷🇺 Введи год, например: 1753",
+                "reply_markup": json.dumps({"keyboard": [[{"text":"↩️ История"}]],"resize_keyboard":True}, ensure_ascii=False)
+            })
+        elif text == "🌍 Мир":
+            HISTORY_MODE[chat] = ("world", None)
+            tg("sendMessage", {
+                "chat_id": chat,
+                "text": "🌍 Введи год, например: 1753",
+                "reply_markup": json.dumps({"keyboard": [[{"text":"↩️ История"}]],"resize_keyboard":True}, ensure_ascii=False)
+            })
         elif text == "🇷🇺 История России":
             HISTORY_MODE[chat] = ("russia", None)
             tg("sendMessage", {
