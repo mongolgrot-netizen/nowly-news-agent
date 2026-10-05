@@ -17,6 +17,8 @@ RSS_BY_CATEGORY = {
         "https://feeds.bbci.co.uk/news/technology/rss.xml",
         "https://feeds.bbci.co.uk/news/business/rss.xml",
         "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
+        "https://news.google.com/rss/search?q=срочно+новости+мир+происшествия&hl=ru&gl=RU&ceid=RU:ru",
+        "https://news.google.com/rss/search?q=последние+новости+события&hl=ru&gl=RU&ceid=RU:ru",
     ],
     "world": [
         "https://feeds.bbci.co.uk/news/world/rss.xml",
@@ -98,7 +100,7 @@ def send(chat, text, buttons=None):
         data["reply_markup"] = json.dumps({"inline_keyboard": buttons}, ensure_ascii=False)
     return tg("sendMessage", data)
 
-def fetch_news(category="news", limit=18):
+def fetch_news(category="news", limit=30):
     items = []
     urls = RSS_BY_CATEGORY.get(category, RSS_BY_CATEGORY["news"])
     for url in urls:
@@ -188,6 +190,9 @@ def select_news(items, category="news"):
         )
 
     category_name = CATEGORIES.get(category, "📰 Новости")
+    fact = fact or {}
+    fact_status = fact.get("status", "single_source")
+    fact_reason = fact.get("reason", "")
     prompt = f"""Ты главный редактор Telegram-канала NOWLY.
 Выбери самые интересные материалы именно для рубрики {category_name}.
 
@@ -221,7 +226,63 @@ def select_news(items, category="news"):
 
     return [items[i] for i in selected]
 
-def ai_post(title, link, summary="", category="news"):
+
+def related_items(target, items, max_items=5):
+    title_words = set(re.findall(r"[а-яёa-z0-9]{4,}", target[0].lower()))
+    scored = []
+    for item in items:
+        if item[1] == target[1]:
+            continue
+        words = set(re.findall(r"[а-яёa-z0-9]{4,}", item[0].lower()))
+        score = len(title_words & words)
+        if score:
+            scored.append((score, item))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [x[1] for x in scored[:max_items]]
+
+def fact_check(target, related):
+    sources = [target] + related
+    material = []
+    for i, (title, link, summary) in enumerate(sources):
+        material.append(
+            f"[{i}] {title}\nИсточник: {link}\nОписание: {summary[:600]}"
+        )
+
+    prompt = """Ты фактчекер новостного редактора NOWLY.
+Проверь выбранную новость только по предоставленным материалам разных источников.
+
+Верни строго JSON:
+{"status":"confirmed|attributed|conflict|single_source","reason":"кратко","safe_facts":["..."],"source_indexes":[0,1]}
+
+Правила:
+- confirmed — ключевой факт подтверждается несколькими независимыми материалами;
+- attributed — есть только заявление конкретной стороны/лица;
+- conflict — источники расходятся по важным фактам;
+- single_source — подтверждения нет;
+- Не придумывай факты.
+- Для военных конфликтов и СВО особенно строго отделяй заявления сторон от подтвержденных событий.
+
+Материалы:
+""" + "\n\n".join(material)
+
+    try:
+        raw = groq(prompt, 0.0)
+        match = re.search(r"\{.*\}", raw, re.S)
+        if match:
+            data = json.loads(match.group(0))
+            if data.get("status") in {"confirmed","attributed","conflict","single_source"}:
+                return data
+    except Exception as e:
+        print("FACT CHECK ERROR:", repr(e))
+
+    return {
+        "status": "single_source",
+        "reason": "Не удалось автоматически получить подтверждение из других материалов.",
+        "safe_facts": [],
+        "source_indexes": [0]
+    }
+
+def ai_post(title, link, summary="", category="news", fact=None):
     category_name = CATEGORIES.get(category, "📰 Новости")
     prompt = f"""Ты главный редактор Telegram-канала NOWLY.
 Напиши готовый короткий пост для рубрики {category_name} на русском языке.
@@ -237,6 +298,9 @@ def ai_post(title, link, summary="", category="news"):
 - Только факты из предоставленной информации.
 - Не додумывай и не усиливай события.
 - Для конфликтов и военных событий обязательно указывай, кому принадлежит заявление, если факт не подтвержден независимым источником.
+- Статус проверки: {fact_status}. Комментарий фактчекера: {fact_reason}
+- Если статус attributed или single_source, используй осторожную атрибуцию.
+- Если статус conflict, укажи, что источники расходятся, и не выбирай одну версию без основания.
 - Не используй Markdown, HTML и служебные пояснения.
 - В конце отдельной строкой: Источник: {link}
 """
@@ -256,11 +320,20 @@ def process_news(chat, category="news"):
         print("SELECT ERROR:", repr(e))
         selected = items[:3]
 
-    send(chat, f"🧠 NOWLY: отобрано материалов: {len(selected)}")
+    send(chat, f"🧠 NOWLY: отобрано материалов: {len(selected)} из {len(items)}")
 
     for title, link, summary in selected:
         try:
-            post = ai_post(title, link, summary, category)
+            related = related_items((title, link, summary), items)
+            fact = fact_check((title, link, summary), related)
+            labels = {
+                "confirmed": "✅ подтверждено",
+                "attributed": "🟡 заявление / атрибуция",
+                "conflict": "🔴 источники расходятся",
+                "single_source": "⚪ один источник"
+            }
+            send(chat, f"🔎 Проверка: {labels.get(fact.get('status'), '⚪ не определено')}\n{fact.get('reason','')[:500]}")
+            post = ai_post(title, link, summary, category, fact)
         except Exception as e:
             print("AI ERROR:", repr(e))
             post = (
