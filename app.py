@@ -55,7 +55,18 @@ RSS_BY_CATEGORY = {
     ],
     "conflicts": [
         "https://news.google.com/rss/search?q=Россия+Украина+СВО+конфликт+война&hl=ru&gl=RU&ceid=RU:ru",
+        "https://news.google.com/rss/search?q=site%3At.me+СВО+Россия+фронт+военкор&hl=ru&gl=RU&ceid=RU:ru",
+        "https://news.google.com/rss/search?q=site%3At.me+военкор+Россия+Украина&hl=ru&gl=RU&ceid=RU:ru",
         "https://feeds.bbci.co.uk/news/world/rss.xml",
+    ],
+    "russia_tech": [
+        "https://news.google.com/rss/search?q=Россия+технологии+наука+разработки+ученые&hl=ru&gl=RU&ceid=RU:ru",
+        "https://news.google.com/rss/search?q=российская+наука+технологии+исследования+РАН&hl=ru&gl=RU&ceid=RU:ru",
+    ],
+    "laws": [
+        "https://news.google.com/rss/search?q=Россия+новые+законы+законопроект+вступает+в+силу&hl=ru&gl=RU&ceid=RU:ru",
+        "https://news.google.com/rss/search?q=Россия+новые+штрафы+изменение+штрафа+КоАП&hl=ru&gl=RU&ceid=RU:ru",
+        "https://news.google.com/rss/search?q=site%3Apravo.gov.ru+закон+постановление+Россия&hl=ru&gl=RU&ceid=RU:ru",
     ],
     "tech": [
         "https://feeds.bbci.co.uk/news/technology/rss.xml",
@@ -106,6 +117,8 @@ CATEGORIES = {
     "wanted": "🔎 Внимание: розыск",
     "kremlin": "🏛 Кремль",
     "conflicts": "⚔️ СВО / конфликты",
+    "russia_tech": "🔬 Технологии и наука России",
+    "laws": "⚖️ Законы и штрафы",
     "tech": "🤖 ИИ / технологии",
     "economy": "💰 Экономика",
     "auto": "🚗 Авто",
@@ -326,8 +339,9 @@ def menu_keyboard():
         [{"text": "📡 События"}, {"text": "🚨 Происшествия"}],
         [{"text": "⚡ Экстренно"}, {"text": "🕵️ Криминал"}],
         [{"text": "🔎 Внимание: розыск"}, {"text": "🏛 Новости Кремля"}],
-        [{"text": "⚔️ Международные конфликты"}],
-        [{"text": "🤖 ИИ / технологии"}, {"text": "💰 Экономика"}],
+        [{"text": "⚔️ СВО"}],
+        [{"text": "🤖 ИИ / технологии"}, {"text": "🔬 Наука и технологии России"}],
+        [{"text": "⚖️ Законы и штрафы"}, {"text": "💰 Экономика"}],
         [{"text": "🚗 Авто"}, {"text": "🔥 Тренды"}],
         [{"text": "😂 Юмор"}, {"text": "🏛 История"}],
         [{"text": "ℹ️ Статус"}]
@@ -428,8 +442,10 @@ def russia_keyboard():
         [{"text": "📡 События"}, {"text": "🚨 Происшествия"}],
         [{"text": "⚡ Экстренно"}, {"text": "🕵️ Криминал"}],
         [{"text": "🔎 Внимание: розыск"}, {"text": "🏛 Новости Кремля"}],
-        [{"text": "⚔️ СВО / конфликты"}],
-        [{"text": "🤖 ИИ / технологии"}, {"text": "💰 Экономика"}],
+        [{"text": "⚔️ СВО"}],
+        [{"text": "📡 Анализ Telegram-каналов по СВО"}],
+        [{"text": "🤖 ИИ / технологии"}, {"text": "🔬 Наука и технологии России"}],
+        [{"text": "⚖️ Законы и штрафы"}, {"text": "💰 Экономика"}],
         [{"text": "🚗 Авто"}, {"text": "🔥 Тренды"}],
         [{"text": "😂 Юмор"}, {"text": "🏛 История"}],
         [{"text": "↩️ Главное меню"}]
@@ -873,8 +889,14 @@ def handle_update(u):
             threading.Thread(target=process_news, args=(chat, "wanted"), daemon=True).start()
         elif text in ("🏛 Кремль", "🏛 Новости Кремля"):
             threading.Thread(target=process_news, args=(chat, "kremlin"), daemon=True).start()
-        elif text == "⚔️ СВО / конфликты":
+        elif text in ("⚔️ СВО", "⚔️ СВО / конфликты"):
             threading.Thread(target=process_news, args=(chat, "conflicts"), daemon=True).start()
+        elif text == "📡 Анализ Telegram-каналов по СВО":
+            threading.Thread(target=process_news, args=(chat, "conflicts"), daemon=True).start()
+        elif text in ("🔬 Наука и технологии России",):
+            threading.Thread(target=process_news, args=(chat, "russia_tech"), daemon=True).start()
+        elif text == "⚖️ Законы и штрафы":
+            threading.Thread(target=process_news, args=(chat, "laws"), daemon=True).start()
         elif text == "🤖 ИИ / технологии":
             threading.Thread(target=process_news, args=(chat, "tech"), daemon=True).start()
         elif text == "💰 Экономика":
