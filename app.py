@@ -325,6 +325,82 @@ def menu_keyboard():
         [{"text": "ℹ️ Статус"}]
     ]
 
+def history_keyboard():
+    return [
+        [{"text": "📅 Этот день в истории"}],
+        [{"text": "🇷🇺 История России"}, {"text": "🌍 История мира"}],
+        [{"text": "🗺 История по регионам"}],
+        [{"text": "↩️ Главное меню"}]
+    ]
+
+def history_scope_keyboard():
+    return [
+        [{"text": "🇷🇺 Россия"}],
+        [{"text": "🌍 Мир"}],
+        [{"text": "🗺 По регионам России"}],
+        [{"text": "↩️ История"}]
+    ]
+
+def history_region_keyboard():
+    return [
+        [{"text": "📍 Москва и МО"}, {"text": "📍 Санкт-Петербург и ЛО"}],
+        [{"text": "📍 ЦФО"}, {"text": "📍 СЗФО"}, {"text": "📍 ЮФО"}],
+        [{"text": "📍 СКФО"}, {"text": "📍 ПФО"}, {"text": "📍 УФО"}],
+        [{"text": "📍 СФО"}, {"text": "📍 ДФО"}],
+        [{"text": "↩️ История"}]
+    ]
+
+def history_day(chat, year, scope="world", region=None):
+    # Бесплатные открытые источники Wikimedia. Сначала берем страницу
+    # конкретной даты, затем при необходимости страницу года.
+    from datetime import datetime
+    now = datetime.now()
+    day = f"{now.day} {['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'][now.month-1]}"
+    send(chat, f"📅 Ищу события {day} {year} года...")
+    try:
+        date_title = f"{now.day}_{['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'][now.month-1]}"
+        url = "https://ru.wikipedia.org/w/api.php"
+        params = {"action":"query","prop":"extracts","explaintext":"1","titles":date_title,"format":"json","formatversion":"2"}
+        rr = requests.get(url, params=params, timeout=20, headers={"User-Agent":"NOWLY-News-Agent/1.0"})
+        rr.raise_for_status()
+        pages = rr.json().get("query",{}).get("pages",[])
+        text_ru = pages[0].get("extract","") if pages else ""
+        if not text_ru:
+            raise RuntimeError("Не удалось получить исторические материалы")
+        # Ограничиваем объем, чтобы не расходовать бесплатный Groq TPM.
+        text_ru = text_ru[:14000]
+        scope_text = {
+            "russia":"Россия",
+            "world":"мир",
+            "region": f"регион {region}" if region else "регионы России"
+        }.get(scope, "мир")
+        prompt = f"""Ты исторический редактор Telegram-канала NOWLY.
+Сегодняшняя дата: {day}. Нужны события именно {day} {year} года.
+Охват: {scope_text}.
+Ниже текст открытой энциклопедической страницы.
+
+Строго:
+- выбери только события, относящиеся к {year} году и именно к этой календарной дате;
+- для России учитывай Российскую империю, СССР и современную Россию, если это исторически уместно;
+- для региона {region or 'не указан'} бери только события, реально связанные с ним;
+- не путай дату события с датой рождения/смерти, если это не указано как событие;
+- если точных событий нет, честно напиши, что надежных данных не найдено;
+- не выдумывай;
+- 2-4 наиболее интересных пункта;
+- русский язык;
+- каждый пункт: год/дата — событие;
+- в конце: Источник: Википедия.
+
+Текст:
+{text_ru}
+"""
+        post = groq(prompt, 0.2, 450)
+        buttons = [[{"text":"✅ Опубликовать","callback_data":"pub"},{"text":"❌ Отклонить","callback_data":"no"}]]
+        send(chat, post, buttons)
+    except Exception as e:
+        print("HISTORY ERROR:", repr(e))
+        send(chat, f"⚠️ Не удалось подготовить историческую публикацию.\n\n{str(e)[:400]}")
+
 def world_keyboard():
     return [
         [{"text": "🌍 Мировые новости"}],
@@ -765,9 +841,49 @@ def handle_update(u):
         elif text == "😂 Юмор":
             threading.Thread(target=process_news, args=(chat, "humor"), daemon=True).start()
         elif text == "🏛 История":
-            threading.Thread(target=process_news, args=(chat, "history"), daemon=True).start()
+            tg("sendMessage", {
+                "chat_id": chat,
+                "text": "🏛 ИСТОРИЯ\n\nВыбери формат:",
+                "reply_markup": json.dumps({"keyboard": history_keyboard(), "resize_keyboard": True, "is_persistent": True}, ensure_ascii=False)
+            })
+        elif text == "📅 Этот день в истории":
+            tg("sendMessage", {
+                "chat_id": chat,
+                "text": "📅 ЭТОТ ДЕНЬ В ИСТОРИИ\n\nВыбери охват:",
+                "reply_markup": json.dumps({"keyboard": history_scope_keyboard(), "resize_keyboard": True}, ensure_ascii=False)
+            })
+        elif text == "🇷🇺 История России":
+            tg("sendMessage", {
+                "chat_id": chat,
+                "text": "🇷🇺 Введи год, например: 1753",
+                "reply_markup": json.dumps({"keyboard": [[{"text":"↩️ История"}]],"resize_keyboard":True}, ensure_ascii=False)
+            })
+        elif text == "🌍 История мира":
+            tg("sendMessage", {
+                "chat_id": chat,
+                "text": "🌍 Введи год, например: 1753",
+                "reply_markup": json.dumps({"keyboard": [[{"text":"↩️ История"}]],"resize_keyboard":True}, ensure_ascii=False)
+            })
+        elif text == "🗺 История по регионам":
+            tg("sendMessage", {
+                "chat_id": chat,
+                "text": "🗺 Выбери регион:",
+                "reply_markup": json.dumps({"keyboard": history_region_keyboard(), "resize_keyboard":True}, ensure_ascii=False)
+            })
         elif text == "🔥 Тренды":
             threading.Thread(target=process_news, args=(chat, "trends"), daemon=True).start()
+        elif text == "🇷🇺 Россия":
+            tg("sendMessage", {
+                "chat_id": chat,
+                "text": "🇷🇺 Введи год для этого дня, например: 1753",
+                "reply_markup": json.dumps({"keyboard": [[{"text":"↩️ История"}]],"resize_keyboard":True}, ensure_ascii=False)
+            })
+        elif text == "🌍 Мир":
+            tg("sendMessage", {
+                "chat_id": chat,
+                "text": "🌍 Введи год для этого дня, например: 1753",
+                "reply_markup": json.dumps({"keyboard": [[{"text":"↩️ История"}]],"resize_keyboard":True}, ensure_ascii=False)
+            })
         elif text.startswith("/status"):
             send(chat, "🟢 NOWLY AI Editor работает.", menu_keyboard())
 
