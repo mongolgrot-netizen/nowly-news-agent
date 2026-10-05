@@ -11,12 +11,59 @@ GROQ_KEY = os.getenv("GROQ_API_KEY", "")
 MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "").rstrip("/")
 
-RSS = [
-    "https://feeds.bbci.co.uk/news/world/rss.xml",
-    "https://feeds.bbci.co.uk/news/technology/rss.xml",
-    "https://feeds.bbci.co.uk/news/business/rss.xml",
-    "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
-]
+RSS_BY_CATEGORY = {
+    "news": [
+        "https://feeds.bbci.co.uk/news/world/rss.xml",
+        "https://feeds.bbci.co.uk/news/technology/rss.xml",
+        "https://feeds.bbci.co.uk/news/business/rss.xml",
+        "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
+    ],
+    "world": [
+        "https://feeds.bbci.co.uk/news/world/rss.xml",
+        "https://news.google.com/rss/search?q=мир+международные+новости&hl=ru&gl=RU&ceid=RU:ru",
+    ],
+    "incidents": [
+        "https://news.google.com/rss/search?q=происшествия+катастрофа+пожар+авария&hl=ru&gl=RU&ceid=RU:ru",
+        "https://feeds.bbci.co.uk/news/world/rss.xml",
+    ],
+    "conflicts": [
+        "https://news.google.com/rss/search?q=Россия+Украина+СВО+конфликт+война&hl=ru&gl=RU&ceid=RU:ru",
+        "https://feeds.bbci.co.uk/news/world/rss.xml",
+    ],
+    "tech": [
+        "https://feeds.bbci.co.uk/news/technology/rss.xml",
+        "https://news.google.com/rss/search?q=ИИ+искусственный+интеллект+технологии&hl=ru&gl=RU&ceid=RU:ru",
+    ],
+    "economy": [
+        "https://feeds.bbci.co.uk/news/business/rss.xml",
+        "https://news.google.com/rss/search?q=экономика+бизнес+финансы&hl=ru&gl=RU&ceid=RU:ru",
+    ],
+    "auto": [
+        "https://news.google.com/rss/search?q=авто+автомобили+машины&hl=ru&gl=RU&ceid=RU:ru",
+    ],
+    "humor": [
+        "https://news.google.com/rss/search?q=юмор+смешные+новости+курьез&hl=ru&gl=RU&ceid=RU:ru",
+    ],
+    "history": [
+        "https://news.google.com/rss/search?q=история+исторические+события+археология&hl=ru&gl=RU&ceid=RU:ru",
+    ],
+    "trends": [
+        "https://news.google.com/rss/search?q=тренды+вирусное+необычное+соцсети&hl=ru&gl=RU&ceid=RU:ru",
+    ],
+}
+
+CATEGORIES = {
+    "news": "📰 Новости",
+    "world": "🌍 Мир",
+    "incidents": "🚨 Происшествия",
+    "conflicts": "⚔️ СВО / конфликты",
+    "tech": "🤖 ИИ / технологии",
+    "economy": "💰 Экономика",
+    "auto": "🚗 Авто",
+    "humor": "😂 Юмор",
+    "history": "🏛 История",
+    "trends": "🔥 Тренды",
+}
 
 def tg(method, data):
     if not TOKEN:
@@ -51,9 +98,10 @@ def send(chat, text, buttons=None):
         data["reply_markup"] = json.dumps({"inline_keyboard": buttons}, ensure_ascii=False)
     return tg("sendMessage", data)
 
-def fetch_news(limit=12):
+def fetch_news(category="news", limit=18):
     items = []
-    for url in RSS:
+    urls = RSS_BY_CATEGORY.get(category, RSS_BY_CATEGORY["news"])
+    for url in urls:
         try:
             r = requests.get(
                 url,
@@ -62,7 +110,7 @@ def fetch_news(limit=12):
             )
             r.raise_for_status()
             f = feedparser.parse(r.content)
-            for e in f.entries[:8]:
+            for e in f.entries[:12]:
                 title = html.unescape(str(e.get("title", "")).strip())
                 link = str(e.get("link", "")).strip()
                 summary = html.unescape(str(
@@ -83,6 +131,26 @@ def fetch_news(limit=12):
             seen.add(key)
             out.append((title, link, summary))
     return out[:limit]
+
+def menu_keyboard():
+    return [
+        [{"text": "📰 Новости"}, {"text": "🌍 Мир"}, {"text": "🚨 Происшествия"}],
+        [{"text": "⚔️ СВО / конфликты"}, {"text": "🤖 ИИ / технологии"}],
+        [{"text": "💰 Экономика"}, {"text": "🚗 Авто"}, {"text": "🔥 Тренды"}],
+        [{"text": "😂 Юмор"}, {"text": "🏛 История"}],
+        [{"text": "ℹ️ Статус"}]
+    ]
+
+def send_menu(chat):
+    tg("sendMessage", {
+        "chat_id": chat,
+        "text": "⚡ NOWLY AI EDITOR\n\nВыбери направление. Я найду свежие материалы именно по этой теме, отберу лучшие и подготовлю посты на проверку.\n\nКанал один — темы разделены на уровне редактора, поэтому позже не придётся плодить десятки каналов.",
+        "reply_markup": json.dumps({
+            "keyboard": menu_keyboard(),
+            "resize_keyboard": True,
+            "is_persistent": True
+        }, ensure_ascii=False)
+    })
 
 def groq(prompt, temperature=0.2):
     if not GROQ_KEY:
@@ -112,22 +180,21 @@ def groq(prompt, temperature=0.2):
     data = r.json()
     return data["choices"][0]["message"]["content"].strip()
 
-def select_news(items):
+def select_news(items, category="news"):
     candidates = []
     for i, (title, link, summary) in enumerate(items):
         candidates.append(
             f"[{i}] {title}\nОписание: {summary[:700]}\nИсточник: {link}"
         )
 
-    prompt = """Ты главный редактор Telegram-канала NOWLY.
-Выбери самые интересные и общественно значимые новости для массовой русскоязычной аудитории.
+    category_name = CATEGORIES.get(category, "📰 Новости")
+    prompt = f"""Ты главный редактор Telegram-канала NOWLY.
+Выбери самые интересные материалы именно для рубрики {category_name}.
 
-Приоритет:
-1. важные события и происшествия;
-2. международные события;
-3. технологии и ИИ;
-4. экономика и бизнес;
-5. необычные и вирусные события.
+Приоритет этой рубрики: релевантность теме, свежесть, общественный интерес и понятность массовой аудитории.
+Для СВО/конфликтов особенно важно отделять подтвержденные факты от заявлений сторон и не выдавать утверждения одной стороны за установленный факт.
+Для юмора и трендов выбирай действительно интересные и массовые истории, а не случайный мусор.
+Для истории выбирай факты, события и находки с понятной исторической ценностью.
 
 Не выбирай несколько материалов об одном событии.
 Не выбирай скучные второстепенные сообщения.
@@ -154,9 +221,10 @@ def select_news(items):
 
     return [items[i] for i in selected]
 
-def ai_post(title, link, summary=""):
+def ai_post(title, link, summary="", category="news"):
+    category_name = CATEGORIES.get(category, "📰 Новости")
     prompt = f"""Ты главный редактор Telegram-канала NOWLY.
-Напиши готовый короткий новостной пост на русском языке.
+Напиши готовый короткий пост для рубрики {category_name} на русском языке.
 
 Заголовок: {title}
 Источник: {link}
@@ -168,20 +236,22 @@ def ai_post(title, link, summary=""):
 - 2-4 коротких абзаца.
 - Только факты из предоставленной информации.
 - Не додумывай и не усиливай события.
+- Для конфликтов и военных событий обязательно указывай, кому принадлежит заявление, если факт не подтвержден независимым источником.
 - Не используй Markdown, HTML и служебные пояснения.
 - В конце отдельной строкой: Источник: {link}
 """
     return groq(prompt, 0.3)
 
-def process_news(chat):
-    send(chat, "⚡ NOWLY: ищу свежие новости и отбираю самые интересные...")
-    items = fetch_news()
+def process_news(chat, category="news"):
+    category_name = CATEGORIES.get(category, "📰 Новости")
+    send(chat, f"⚡ NOWLY: ищу свежие материалы — {category_name}...")
+    items = fetch_news(category)
     if not items:
         send(chat, "⚠️ Не удалось получить свежие новости. Попробуй ещё раз через минуту.")
         return
 
     try:
-        selected = select_news(items)
+        selected = select_news(items, category)
     except Exception as e:
         print("SELECT ERROR:", repr(e))
         selected = items[:3]
@@ -190,7 +260,7 @@ def process_news(chat):
 
     for title, link, summary in selected:
         try:
-            post = ai_post(title, link, summary)
+            post = ai_post(title, link, summary, category)
         except Exception as e:
             print("AI ERROR:", repr(e))
             post = (
@@ -215,21 +285,30 @@ def handle_update(u):
         if ADMIN_ID and str(chat) != str(ADMIN_ID):
             return
 
-        if text.startswith("/start"):
-            send(
-                chat,
-                "⚡ NOWLY AI EDITOR\n\n"
-                "/news — найти и подготовить лучшие свежие новости\n"
-                "/status — проверить работу бота"
-            )
-        elif text.startswith("/news"):
-            threading.Thread(
-                target=process_news,
-                args=(chat,),
-                daemon=True
-            ).start()
+        if text.startswith("/start") or text == "ℹ️ Статус":
+            send_menu(chat)
+        elif text.startswith("/news") or text == "📰 Новости":
+            threading.Thread(target=process_news, args=(chat, "news"), daemon=True).start()
+        elif text == "🌍 Мир":
+            threading.Thread(target=process_news, args=(chat, "world"), daemon=True).start()
+        elif text == "🚨 Происшествия":
+            threading.Thread(target=process_news, args=(chat, "incidents"), daemon=True).start()
+        elif text == "⚔️ СВО / конфликты":
+            threading.Thread(target=process_news, args=(chat, "conflicts"), daemon=True).start()
+        elif text == "🤖 ИИ / технологии":
+            threading.Thread(target=process_news, args=(chat, "tech"), daemon=True).start()
+        elif text == "💰 Экономика":
+            threading.Thread(target=process_news, args=(chat, "economy"), daemon=True).start()
+        elif text == "🚗 Авто":
+            threading.Thread(target=process_news, args=(chat, "auto"), daemon=True).start()
+        elif text == "😂 Юмор":
+            threading.Thread(target=process_news, args=(chat, "humor"), daemon=True).start()
+        elif text == "🏛 История":
+            threading.Thread(target=process_news, args=(chat, "history"), daemon=True).start()
+        elif text == "🔥 Тренды":
+            threading.Thread(target=process_news, args=(chat, "trends"), daemon=True).start()
         elif text.startswith("/status"):
-            send(chat, "🟢 NOWLY AI Editor работает.")
+            send(chat, "🟢 NOWLY AI Editor работает.", menu_keyboard())
 
     elif "callback_query" in u:
         q = u["callback_query"]
