@@ -319,13 +319,33 @@ def fetch_news(category="news", limit=30, region=None):
 
 def menu_keyboard():
     return [
-        [{"text": "📰 Новости"}, {"text": "🌍 Мир"}, {"text": "🇷🇺 Россия"}],
-        [{"text": "📡 События"}, {"text": "🚨 Происшествия"}, {"text": "⚡ Экстренно"}],
-        [{"text": "🕵️ Криминал"}, {"text": "🔎 Розыск"}, {"text": "🏛 Кремль"}],
-        [{"text": "⚔️ СВО / конфликты"}, {"text": "🤖 ИИ / технологии"}],
-        [{"text": "💰 Экономика"}, {"text": "🚗 Авто"}, {"text": "🔥 Тренды"}],
+        [{"text": "🌍 Мир"}],
+        [{"text": "🇷🇺 Россия"}],
+        [{"text": "🗺 Россия по регионам"}],
+        [{"text": "ℹ️ Статус"}]
+    ]
+
+def world_keyboard():
+    return [
+        [{"text": "🌍 Мировые новости"}],
+        [{"text": "⚔️ Международные конфликты"}],
+        [{"text": "🤖 ИИ / технологии"}, {"text": "💰 Экономика"}],
+        [{"text": "🚗 Авто"}, {"text": "🔥 Тренды"}],
         [{"text": "😂 Юмор"}, {"text": "🏛 История"}],
-        [{"text": "🗺 Россия по регионам"}, {"text": "ℹ️ Статус"}]
+        [{"text": "↩️ Главное меню"}]
+    ]
+
+def russia_keyboard():
+    return [
+        [{"text": "🇷🇺 Федеральные новости"}],
+        [{"text": "📡 События"}, {"text": "🚨 Происшествия"}],
+        [{"text": "⚡ Экстренно"}, {"text": "🕵️ Криминал"}],
+        [{"text": "🔎 Розыск"}, {"text": "🏛 Кремль"}],
+        [{"text": "⚔️ СВО / конфликты"}],
+        [{"text": "🤖 ИИ / технологии"}, {"text": "💰 Экономика"}],
+        [{"text": "🚗 Авто"}, {"text": "🔥 Тренды"}],
+        [{"text": "😂 Юмор"}, {"text": "🏛 История"}],
+        [{"text": "↩️ Главное меню"}]
     ]
 
 def region_keyboard():
@@ -669,7 +689,11 @@ def handle_update(u):
                 "reply_markup": json.dumps({"keyboard": region_keyboard(), "resize_keyboard": True}, ensure_ascii=False)
             })
         elif text == "🇷🇺 Россия":
-            threading.Thread(target=process_news, args=(chat, "russia"), daemon=True).start()
+            tg("sendMessage", {
+                "chat_id": chat,
+                "text": "🇷🇺 РОССИЯ\n\nВыбери направление:",
+                "reply_markup": json.dumps({"keyboard": russia_keyboard(), "resize_keyboard": True, "is_persistent": True}, ensure_ascii=False)
+            })
         elif text == "🇷🇺 Федеральные новости":
             threading.Thread(target=process_news, args=(chat, "russia"), daemon=True).start()
         elif text == "↩️ Главное меню":
@@ -709,7 +733,15 @@ def handle_update(u):
         elif text.startswith("/news") or text == "📰 Новости":
             threading.Thread(target=process_news, args=(chat, "news"), daemon=True).start()
         elif text == "🌍 Мир":
+            tg("sendMessage", {
+                "chat_id": chat,
+                "text": "🌍 МИР\n\nВыбери направление:",
+                "reply_markup": json.dumps({"keyboard": world_keyboard(), "resize_keyboard": True, "is_persistent": True}, ensure_ascii=False)
+            })
+        elif text == "🌍 Мировые новости":
             threading.Thread(target=process_news, args=(chat, "world"), daemon=True).start()
+        elif text == "⚔️ Международные конфликты":
+            threading.Thread(target=process_news, args=(chat, "conflicts"), daemon=True).start()
         elif text == "📡 События":
             threading.Thread(target=process_news, args=(chat, "events"), daemon=True).start()
         elif text == "🚨 Происшествия":
