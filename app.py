@@ -372,56 +372,78 @@ def history_region_keyboard():
         [{"text": "↩️ История"}]
     ]
 
-def history_day(chat, year, scope="world", region=None):
-    # Бесплатные открытые источники Wikimedia. Сначала берем страницу
-    # конкретной даты, затем при необходимости страницу года.
+def history_day(chat, scope="world", region=None):
     from datetime import datetime
-    now = datetime.now()
-    day = f"{now.day} {['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'][now.month-1]}"
-    send(chat, f"📅 Ищу события {day} {year} года...")
-    try:
-        date_title = f"{now.day}_{['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'][now.month-1]}"
-        url = "https://ru.wikipedia.org/w/api.php"
-        params = {"action":"query","prop":"extracts","explaintext":"1","titles":date_title,"format":"json","formatversion":"2"}
-        rr = requests.get(url, params=params, timeout=20, headers={"User-Agent":"NOWLY-News-Agent/1.0"})
-        rr.raise_for_status()
-        pages = rr.json().get("query",{}).get("pages",[])
-        text_ru = pages[0].get("extract","") if pages else ""
-        if not text_ru:
-            raise RuntimeError("Не удалось получить исторические материалы")
-        # Ограничиваем объем, чтобы не расходовать бесплатный Groq TPM.
-        text_ru = text_ru[:14000]
-        scope_text = {
-            "russia":"Россия",
-            "world":"мир",
-            "region": f"регион {region}" if region else "регионы России"
-        }.get(scope, "мир")
-        prompt = f"""Ты исторический редактор Telegram-канала NOWLY.
-Сегодняшняя дата: {day}. Нужны события именно {day} {year} года.
-Охват: {scope_text}.
-Ниже текст открытой энциклопедической страницы.
+    now=datetime.now()
+    day,month=now.day,now.month
+    date_label=now.strftime("%-d.%m")
+    lang="ru" if scope!="world" else "en"
+    urls=[
+        f"https://api.wikimedia.org/feed/v1/wikipedia/{lang}/onthisday/events/{month:02d}/{day:02d}",
+        f"https://{lang}.wikipedia.org/api/rest_v1/feed/onthisday/events/{month:02d}/{day:02d}"
+    ]
+    events=[]
+    for url in urls:
+        try:
+            rr=requests.get(url,timeout=20,headers={"User-Agent":"NOWLY/1.0"})
+            if rr.ok:
+                events=rr.json().get("events",[])
+                if events: break
+        except Exception as ex:
+            print("HISTORY API:",repr(ex))
 
-Строго:
-- выбери только события, относящиеся к {year} году и именно к этой календарной дате;
-- для России учитывай Российскую империю, СССР и современную Россию, если это исторически уместно;
-- для региона {region or 'не указан'} бери только события, реально связанные с ним;
-- не путай дату события с датой рождения/смерти, если это не указано как событие;
-- если точных событий нет, честно напиши, что надежных данных не найдено;
-- не выдумывай;
-- 2-4 наиболее интересных пункта;
-- русский язык;
-- каждый пункт: год/дата — событие;
-- в конце: Источник: Википедия.
+    if scope=="russia":
+        scope_text="Россия: Российская империя, СССР и современная Россия."
+    elif scope=="region":
+        scope_text=f"только {region}"
+    else:
+        scope_text="весь мир"
 
-Текст:
-{text_ru}
+    data=[]
+    for ev in events[:50]:
+        text_ev=(ev.get("text") or "").strip()
+        year=ev.get("year")
+        pages=ev.get("pages") or []
+        if text_ev:
+            data.append({"year":year,"text":text_ev[:900],"pages":pages[:1]})
+
+    if not data:
+        send(chat,f"📅 ЭТОТ ДЕНЬ В ИСТОРИИ — {date_label}\n\nНе удалось получить исторические события за сегодняшнюю дату.")
+        return
+
+    prompt=f"""Ты исторический редактор NOWLY.
+Сегодня {date_label}. Подготовь рубрику «Этот день в истории» для охвата: {scope_text}.
+
+ВАЖНО: год НЕ задается пользователем. Выбирай значимые события, произошедшие именно в этот календарный день в РАЗНЫЕ годы.
+Выбери 5–8 самых интересных событий из разных эпох. Приоритет: войны и переломные события, государственные решения, революции, открытия, наука, технологии, катастрофы, культура и другие события с заметным историческим значением.
+Не включай обычные дни рождения и смерти, если они не являются самостоятельным значимым событием.
+Для России и региона отбрасывай события, не относящиеся к выбранному охвату.
+Не выдумывай годы или факты.
+
+Формат:
+📅 ЭТОТ ДЕНЬ В ИСТОРИИ — {date_label}
+
+ГОД — событие
+ГОД — событие
+...
+
+Источник: Wikimedia / Wikipedia.
+
+Без Markdown, HTML и служебных пояснений.
+
+Данные Wikimedia:
+{json.dumps(data,ensure_ascii=False)}
 """
-        post = groq(prompt, 0.2, 450)
-        buttons = [[{"text":"✅ Опубликовать","callback_data":"pub"},{"text":"❌ Отклонить","callback_data":"no"}]]
-        send(chat, post, buttons)
-    except Exception as e:
-        print("HISTORY ERROR:", repr(e))
-        send(chat, f"⚠️ Не удалось подготовить историческую публикацию.\n\n{str(e)[:400]}")
+    try:
+        post=groq(prompt,0.2,800).strip()
+        if not post: raise ValueError("empty")
+    except Exception as ex:
+        print("HISTORY AI:",repr(ex))
+        post=f"📅 ЭТОТ ДЕНЬ В ИСТОРИИ — {date_label}\n\n" + "\n".join(
+            f"{x['year']} — {x['text']}" for x in data[:8]
+        ) + "\n\nИсточник: Wikimedia / Wikipedia."
+    send(chat,post,[[{"text":"✅ Опубликовать","callback_data":"pub"},{"text":"❌ Отклонить","callback_data":"no"}]])
+
 
 def world_keyboard():
     return [
@@ -1014,16 +1036,18 @@ def handle_update(u):
             })
         elif text == "🇷🇺 Россия — этот день":
             HISTORY_MODE[chat] = ("russia", None)
+            threading.Thread(target=history_day, args=(chat, "russia"), daemon=True).start()
             tg("sendMessage", {
                 "chat_id": chat,
-                "text": "🇷🇺 Введи год, например: 1753",
+                "text": "⏳ Ищу значимые события, которые происходили в этот день в разные годы…",
                 "reply_markup": json.dumps({"keyboard": [[{"text":"↩️ История"}]],"resize_keyboard":True}, ensure_ascii=False)
             })
         elif text == "🌍 Мир — этот день":
             HISTORY_MODE[chat] = ("world", None)
+            threading.Thread(target=history_day, args=(chat, "world"), daemon=True).start()
             tg("sendMessage", {
                 "chat_id": chat,
-                "text": "🌍 Введи год, например: 1753",
+                "text": "⏳ Ищу значимые события, которые происходили в этот день в разные годы…",
                 "reply_markup": json.dumps({"keyboard": [[{"text":"↩️ История"}]],"resize_keyboard":True}, ensure_ascii=False)
             })
         elif text == "🇷🇺 История России":
