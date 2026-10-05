@@ -1003,7 +1003,7 @@ def handle_update(u):
             region = text[3:].strip()
             if region in REGION_QUERIES:
                 if HISTORY_MODE.get(chat) == ("region_select", None):
-                    HISTORY_MODE[chat] = ("region", region)
+                    HISTORY_MODE.pop(chat, None)
                     threading.Thread(target=history_day, args=(chat, "region", region), daemon=True).start()
                     tg("sendMessage", {
                         "chat_id": chat,
@@ -1096,7 +1096,7 @@ def handle_update(u):
                 "reply_markup": json.dumps({"keyboard": history_scope_keyboard(), "resize_keyboard": True}, ensure_ascii=False)
             })
         elif text == "🇷🇺 Россия — этот день":
-            HISTORY_MODE[chat] = ("russia", None)
+            HISTORY_MODE.pop(chat, None)
             threading.Thread(target=history_day, args=(chat, "russia"), daemon=True).start()
             tg("sendMessage", {
                 "chat_id": chat,
@@ -1104,7 +1104,7 @@ def handle_update(u):
                 "reply_markup": json.dumps({"keyboard": [[{"text":"↩️ История"}]],"resize_keyboard":True}, ensure_ascii=False)
             })
         elif text == "🌍 Мир — этот день":
-            HISTORY_MODE[chat] = ("world", None)
+            HISTORY_MODE.pop(chat, None)
             threading.Thread(target=history_day, args=(chat, "world"), daemon=True).start()
             tg("sendMessage", {
                 "chat_id": chat,
@@ -1112,7 +1112,7 @@ def handle_update(u):
                 "reply_markup": json.dumps({"keyboard": [[{"text":"↩️ История"}]],"resize_keyboard":True}, ensure_ascii=False)
             })
         elif text == "🇷🇺 История России":
-            HISTORY_MODE[chat] = ("russia", None)
+            HISTORY_MODE.pop(chat, None)
             threading.Thread(target=history_day, args=(chat, "russia"), daemon=True).start()
             tg("sendMessage", {
                 "chat_id": chat,
@@ -1120,14 +1120,14 @@ def handle_update(u):
                 "reply_markup": json.dumps({"keyboard": [[{"text":"↩️ История"}]],"resize_keyboard":True}, ensure_ascii=False)
             })
         elif text == "🌍 История мира":
-            HISTORY_MODE[chat] = ("world", None)
+            HISTORY_MODE.pop(chat, None)
             threading.Thread(target=history_day, args=(chat, "world"), daemon=True).start()
             tg("sendMessage", {
                 "chat_id": chat,
                 "text": "⏳ Ищу значимые события, которые происходили в этот день в разные годы…",
                 "reply_markup": json.dumps({"keyboard": [[{"text":"↩️ История"}]],"resize_keyboard":True}, ensure_ascii=False)
             })
-        elif text == "🗺 История по регионам":
+        elif text in ("🗺 История по регионам", "🗺 Регионы — этот день"):
             HISTORY_MODE[chat] = ("region_select", None)
             tg("sendMessage", {
                 "chat_id": chat,
@@ -1137,14 +1137,10 @@ def handle_update(u):
         elif text == "🔥 Тренды":
             threading.Thread(target=process_news, args=(chat, "trends"), daemon=True).start()
         elif re.fullmatch(r"\d{4}", text.strip()) and chat in HISTORY_MODE:
-            mode = HISTORY_MODE.pop(chat)
-            year = int(text.strip())
-            if 1 <= year <= 2100:
-                scope = mode[0]
-                region = mode[1] if len(mode) > 1 else None
-                threading.Thread(target=history_day, args=(chat, year, scope, region), daemon=True).start()
-            else:
-                send(chat, "⚠️ Введи корректный год, например: 1753.")
+            # Legacy year input is intentionally disabled: the rubric now uses today's date automatically.
+            HISTORY_MODE.pop(chat, None)
+            send(chat, "📅 NOWLY автоматически использует сегодняшнюю дату. Выбери «Этот день в истории» снова.")
+
         elif text.startswith("/status"):
             send(chat, "🟢 NOWLY AI Editor работает.", menu_keyboard())
 
