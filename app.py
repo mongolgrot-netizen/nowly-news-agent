@@ -944,9 +944,10 @@ def handle_update(u):
             if region in REGION_QUERIES:
                 if HISTORY_MODE.get(chat) == ("region_select", None):
                     HISTORY_MODE[chat] = ("region", region)
+                    threading.Thread(target=history_day, args=(chat, "region", region), daemon=True).start()
                     tg("sendMessage", {
                         "chat_id": chat,
-                        "text": f"🗺 ИСТОРИЯ — {region}\n\nВведи год, например: 1753",
+                        "text": f"⏳ Ищу значимые события {region}, произошедшие в этот день в разные годы…",
                         "reply_markup": json.dumps({"keyboard": [[{"text":"↩️ История"}]],"resize_keyboard":True}, ensure_ascii=False)
                     })
                 else:
@@ -1052,16 +1053,18 @@ def handle_update(u):
             })
         elif text == "🇷🇺 История России":
             HISTORY_MODE[chat] = ("russia", None)
+            threading.Thread(target=history_day, args=(chat, "russia"), daemon=True).start()
             tg("sendMessage", {
                 "chat_id": chat,
-                "text": "🇷🇺 Введи год, например: 1753",
+                "text": "⏳ Ищу значимые события, которые происходили в этот день в разные годы…",
                 "reply_markup": json.dumps({"keyboard": [[{"text":"↩️ История"}]],"resize_keyboard":True}, ensure_ascii=False)
             })
         elif text == "🌍 История мира":
             HISTORY_MODE[chat] = ("world", None)
+            threading.Thread(target=history_day, args=(chat, "world"), daemon=True).start()
             tg("sendMessage", {
                 "chat_id": chat,
-                "text": "🌍 Введи год, например: 1753",
+                "text": "⏳ Ищу значимые события, которые происходили в этот день в разные годы…",
                 "reply_markup": json.dumps({"keyboard": [[{"text":"↩️ История"}]],"resize_keyboard":True}, ensure_ascii=False)
             })
         elif text == "🗺 История по регионам":
