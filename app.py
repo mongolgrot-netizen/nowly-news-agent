@@ -706,6 +706,10 @@ def search_related_news(target, max_items=10):
     if distinctive:
         # Broad entity/event search.
         queries.append(" ".join(distinctive[:6]))
+        proper = re.findall(r"\b(?:RAF|Fairford|US|UK|No10|BBC|AP|Reuters|Trump|London|Ukraine|Russia)\b", title, re.I)
+        proper = list(dict.fromkeys(proper))
+        if len(proper) >= 2:
+            queries.insert(0, " ".join(proper[:4]))
         if len(distinctive) >= 4:
             queries.append(" ".join(distinctive[:3] + distinctive[-3:]))
         if len(distinctive) >= 6:
@@ -722,6 +726,8 @@ def search_related_news(target, max_items=10):
         title_terms = re.findall(r"[A-Z][A-Za-z0-9-]{2,}|[А-ЯЁ][А-ЯЁа-яё-]{3,}", title)
         if len(title_terms) >= 2:
             queries.append(" ".join(title_terms[:5]))
+            if len(title_terms) >= 2:
+                queries.append(" ".join(title_terms[-5:]))
 
     out, seen = [], set()
     for query in queries[:6]:
@@ -937,12 +943,12 @@ def process_news(chat, category="news", region=None):
             if key != link and key not in seen:
                 seen.add(key)
                 merged.append(item)
-        related = merged[:4]
+        related = merged[:8]
 
-        source_lines = [(title, link)] + [(x[0], x[1]) for x in related[:4]]
+        source_lines = [(title, link)] + [(x[0], x[1]) for x in related[:8]]
         material = "\n\n".join(
             f"[{i}] {x[0]}\nИсточник: {x[1]}\nОписание: {x[2][:500]}"
-            for i, x in enumerate([selected[0]] + related[:4])
+            for i, x in enumerate([selected[0]] + related[:8])
         )
 
         prompt = f"""Ты редактор новостного Telegram-канала NOWLY.
@@ -971,6 +977,12 @@ def process_news(chat, category="news", region=None):
 
 Материалы:
 {material}
+"""
+        prompt += """
+Дополнительное правило фактчека:
+- Считай источники независимыми, если это разные редакции/домены, даже если формулировки отличаются.
+- Для англоязычных мировых новостей не требуй совпадения слов в заголовках: сопоставляй место, объект, участников и последовательность событий.
+- Если два или более крупных независимых СМИ сообщают об одном и том же событии, это минимум partial_confirmed; если ключевой факт совпадает — confirmed.
 """
         raw = groq(prompt, 0.1, 650)
         match = re.search(r"\{.*\}", raw, re.S)
