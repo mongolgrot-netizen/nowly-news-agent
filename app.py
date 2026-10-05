@@ -225,39 +225,96 @@ def select_news(items, category="news"):
 
 
 def related_items(target, items, max_items=5):
-    title_words = set(re.findall(r"[а-яёa-z0-9]{4,}", target[0].lower()))
+    # Compare title + summary, not title only.
+    text_a = f"{target[0]} {target[2]}".lower()
+    words_a = set(re.findall(r"[а-яёa-z0-9]{4,}", text_a))
+    stop = {
+        "который","которая","которые","после","перед","этого","также",
+        "сообщил","сообщила","сообщили","стало","стали","новости",
+        "российский","российская","украинский","украинская","черном",
+        "black","sea","news"
+    }
+    words_a -= stop
     scored = []
     for item in items:
         if item[1] == target[1]:
             continue
-        words = set(re.findall(r"[а-яёa-z0-9]{4,}", item[0].lower()))
-        score = len(title_words & words)
+        text_b = f"{item[0]} {item[2]}".lower()
+        words_b = set(re.findall(r"[а-яёa-z0-9]{4,}", text_b)) - stop
+        score = len(words_a & words_b)
         if score:
             scored.append((score, item))
     scored.sort(key=lambda x: x[0], reverse=True)
     return [x[1] for x in scored[:max_items]]
+
+def search_related_news(target, max_items=8):
+    # Free cross-source lookup through Google News RSS.
+    title = target[0]
+    words = re.findall(r"[а-яёa-z0-9]{5,}", title.lower())
+    stop = {
+        "российский","российская","украинский","украинская","сообщил",
+        "сообщила","заявил","заявила","ужасный","черном","черного",
+        "после","погиб","погибли","новости"
+    }
+    words = [w for w in words if w not in stop][:7]
+    if not words:
+        return []
+    query = "+".join(words)
+    url = (
+        "https://news.google.com/rss/search?q=" + query +
+        "&hl=ru&gl=RU&ceid=RU:ru"
+    )
+    out = []
+    try:
+        r = requests.get(
+            url,
+            timeout=12,
+            headers={"User-Agent": "NOWLY-News-Agent/1.0"}
+        )
+        r.raise_for_status()
+        f = feedparser.parse(r.content)
+        for e in f.entries[:max_items]:
+            t = html.unescape(str(e.get("title", "")).strip())
+            l = str(e.get("link", "")).strip()
+            sm = html.unescape(str(e.get("summary", "") or "").strip())
+            sm = re.sub(r"<[^>]+>", " ", sm)
+            sm = re.sub(r"\s+", " ", sm).strip()
+            if t and l and l != target[1]:
+                out.append((t, l, sm))
+    except Exception as e:
+        print("RELATED SEARCH ERROR:", repr(e))
+    return out
 
 def fact_check(target, related):
     sources = [target] + related
     material = []
     for i, (title, link, summary) in enumerate(sources):
         material.append(
-            f"[{i}] {title}\nИсточник: {link}\nОписание: {summary[:600]}"
+            f"[{i}] {title}\nИсточник: {link}\nОписание: {summary[:900]}"
         )
 
-    prompt = """Ты фактчекер новостного редактора NOWLY.
-Проверь выбранную новость только по предоставленным материалам разных источников.
+    prompt = """Ты старший фактчекер новостного редактора NOWLY.
+Сравни все предоставленные материалы об ОДНОМ событии.
 
 Верни строго JSON:
-{"status":"confirmed|attributed|conflict|single_source","reason":"кратко","safe_facts":["..."],"source_indexes":[0,1]}
+{"status":"confirmed|partial_confirmed|attributed|conflict|single_source",
+"reason":"краткое объяснение",
+"safe_facts":["только подтвержденные несколькими источниками факты"],
+"disputed_facts":["детали, которые подтверждены только одной стороной или расходятся"],
+"source_indexes":[0,1]}
 
 Правила:
-- confirmed — ключевой факт подтверждается несколькими независимыми материалами;
-- attributed — есть только заявление конкретной стороны/лица;
-- conflict — источники расходятся по важным фактам;
-- single_source — подтверждения нет;
+- confirmed: ключевые факты совпадают минимум в двух независимых источниках.
+- partial_confirmed: само событие подтверждается несколькими источниками, но отдельные детали (причина, виновник, число погибших, обстоятельства) подтверждены не всеми.
+- attributed: существенный факт существует только как заявление конкретного лица/стороны.
+- conflict: независимые источники прямо расходятся по существенной детали.
+- single_source: по существу есть только один источник.
+- Отдельно сравнивай ЧИСЛА: погибшие, спасенные, раненые.
+- Отдельно сравнивай ПРИЧИНУ события и АВТОРСТВО.
+- Не считай одинаковую перепечатку одного сообщения независимым подтверждением.
+- Если официальный орган подтверждает само происшествие, но не подтверждает его причину, это partial_confirmed, а причина должна быть disputed_facts.
 - Не придумывай факты.
-- Для военных конфликтов и СВО особенно строго отделяй заявления сторон от подтвержденных событий.
+- Для военных конфликтов особенно строго отделяй заявления сторон от подтвержденных сведений.
 
 Материалы:
 """ + "\n\n".join(material)
@@ -267,42 +324,62 @@ def fact_check(target, related):
         match = re.search(r"\{.*\}", raw, re.S)
         if match:
             data = json.loads(match.group(0))
-            if data.get("status") in {"confirmed","attributed","conflict","single_source"}:
+            allowed = {
+                "confirmed","partial_confirmed","attributed",
+                "conflict","single_source"
+            }
+            if data.get("status") in allowed:
                 return data
     except Exception as e:
         print("FACT CHECK ERROR:", repr(e))
 
     return {
         "status": "single_source",
-        "reason": "Не удалось автоматически получить подтверждение из других материалов.",
+        "reason": "Не удалось автоматически получить независимые подтверждения.",
         "safe_facts": [],
+        "disputed_facts": [],
         "source_indexes": [0]
     }
 
-def ai_post(title, link, summary="", category="news", fact=None):
+def ai_post(title, link, summary="", category="news", fact=None, sources=None):
     category_name = CATEGORIES.get(category, "📰 Новости")
     fact = fact or {}
     fact_status = fact.get("status", "single_source")
     fact_reason = fact.get("reason", "")
+    safe_facts = fact.get("safe_facts", [])
+    disputed = fact.get("disputed_facts", [])
+    source_lines = []
+    for src in (sources or []):
+        if len(src) >= 2:
+            source_lines.append(f"- {src[0]} — {src[1]}")
     prompt = f"""Ты главный редактор Telegram-канала NOWLY.
 Напиши готовый короткий пост для рубрики {category_name} на русском языке.
 
+Основной материал:
 Заголовок: {title}
 Источник: {link}
 Описание: {summary}
 
+Результат фактчека:
+Статус: {fact_status}
+Причина: {fact_reason}
+Подтвержденные факты: {json.dumps(safe_facts, ensure_ascii=False)}
+Спорные/неподтвержденные детали: {json.dumps(disputed, ensure_ascii=False)}
+
 Правила:
 - Только русский язык.
-- Заголовок яркий, но нейтральный, с одним подходящим эмодзи.
+- Не называй утверждение фактом, если оно не подтверждено.
+- Если событие подтверждено, но причина/виновник/детали спорны, четко раздели эти части.
+- Если есть разные цифры, используй только цифру, подтвержденную независимыми источниками; если источники расходятся, прямо укажи расхождение.
+- Для заявлений Зеленского, российских властей или других сторон обязательно используй "заявил", "сообщила сторона", "по данным..." вместо выдачи заявления за установленный факт.
+- Не придумывай.
+- Заголовок яркий, но нейтральный, с одним эмодзи.
 - 2-4 коротких абзаца.
-- Только факты из предоставленной информации.
-- Не додумывай и не усиливай события.
-- Для конфликтов и военных событий обязательно указывай, кому принадлежит заявление, если факт не подтвержден независимым источником.
-- Статус проверки: {fact_status}. Комментарий фактчекера: {fact_reason}
-- Если статус attributed или single_source, используй осторожную атрибуцию.
-- Если статус conflict, укажи, что источники расходятся, и не выбирай одну версию без основания.
-- Не используй Markdown, HTML и служебные пояснения.
 - В конце отдельной строкой: Источник: {link}
+- Не используй Markdown, HTML и служебные пояснения.
+
+Дополнительные материалы:
+{chr(10).join(source_lines)}
 """
     return groq(prompt, 0.3)
 
@@ -325,20 +402,40 @@ def process_news(chat, category="news"):
     for title, link, summary in selected:
         try:
             related = related_items((title, link, summary), items)
+            searched = search_related_news((title, link, summary))
+            # Merge and deduplicate by URL/title.
+            pool = related + searched
+            seen = set()
+            merged = []
+            for item in pool:
+                key = item[1] or item[0].lower()
+                if key not in seen and item[1] != link:
+                    seen.add(key)
+                    merged.append(item)
+            related = merged[:8]
+
             fact = fact_check((title, link, summary), related)
             labels = {
-                "confirmed": "✅ подтверждено",
+                "confirmed": "🟢 подтверждено",
+                "partial_confirmed": "🟠 частично подтверждено",
                 "attributed": "🟡 заявление / атрибуция",
                 "conflict": "🔴 источники расходятся",
                 "single_source": "⚪ один источник"
             }
-            send(chat, f"🔎 Проверка: {labels.get(fact.get('status'), '⚪ не определено')}\n{fact.get('reason','')[:500]}")
-            post = ai_post(title, link, summary, category, fact)
+            send(chat, f"🔎 Проверка: {labels.get(fact.get('status'), '⚪ не определено')}\n{fact.get('reason','')[:700]}")
+
+            source_list = [(title, link)] + [
+                (x[0], x[1]) for x in related[:5]
+            ]
+            post = ai_post(
+                title, link, summary, category, fact,
+                source_list
+            )
         except Exception as e:
             print("AI ERROR:", repr(e))
             post = (
                 "⚠️ Не удалось обработать новость\n\n"
-                "AI-перевод временно недоступен. Новость не публикуется.\n\n"
+                "AI-редактор временно недоступен. Новость не публикуется.\n\n"
                 f"Техническая причина: {str(e)[:500]}\n\n"
                 f"Источник: {link}"
             )
