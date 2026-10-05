@@ -667,30 +667,70 @@ def related_items(target, items, max_items=5):
     scored.sort(key=lambda x: x[0], reverse=True)
     return [x[1] for x in scored[:max_items]]
 
-def search_related_news(target, max_items=8):
+def search_related_news(target, max_items=10):
     # Free cross-source lookup through Google News RSS.
-    # Search by the key facts, not the whole headline, to catch independent reports.
-    title = target[0]
+    # Use several independent query formulations. This is important for
+    # English-language stories: searching the whole headline is often too
+    # specific and can return only the original publisher.
+    title = target[0] if target else ""
     summary = target[2] if len(target) > 2 else ""
-    words = re.findall(r"[а-яёa-z0-9]{5,}", f"{title} {summary}".lower())
+
+    raw_text = f"{title} {summary}".lower()
+    words = re.findall(r"[а-яёa-z0-9]{4,}", raw_text)
+
     stop = {
+        # Russian generic words
         "российский","российская","российское","украинский","украинская",
-        "сообщил","сообщила","сообщили","заявил","заявила","после","погиб",
-        "погибли","новости","стало","стали","который","которая","которые",
-        "сегодня","также","время","районе","области"
+        "сообщил","сообщила","сообщили","заявил","заявила","заявили",
+        "после","перед","погиб","погибли","новости","стало","стали",
+        "который","которая","которые","сегодня","также","время","районе",
+        "области","новый","новые","this","that","with","from","after",
+        "following","reported","says","said","news","world","latest",
+        "military","official","officials","base","site","safe","insists",
+        "withdraws","withdraw","returning","returns","back","week",
+        # common English headline glue
+        "the","and","for","are","was","were","has","have","had","into",
+        "over","amid","about","near","their","they","them","been","being",
+        "british","american","united","states","kingdom"
     }
-    words = [w for w in words if w not in stop][:9]
-    if not words:
-        return []
-    queries = ["+".join(words[:6]), "+".join(words[:4] + words[-3:])]
+    words = [w for w in words if w not in stop]
+
+    # Keep distinctive terms, preserving their order.
+    distinctive = []
+    for w in words:
+        if w not in distinctive:
+            distinctive.append(w)
+    distinctive = distinctive[:14]
+
+    queries = []
+    if distinctive:
+        # Broad entity/event search.
+        queries.append(" ".join(distinctive[:6]))
+        if len(distinctive) >= 4:
+            queries.append(" ".join(distinctive[:3] + distinctive[-3:]))
+        if len(distinctive) >= 6:
+            queries.append(" ".join(distinctive[1:7]))
+        # Search two highly distinctive pairs separately. This catches
+        # reports whose headline uses different wording.
+        if len(distinctive) >= 4:
+            queries.append(f'"{distinctive[0]}" "{distinctive[1]}"')
+            queries.append(f'"{distinctive[0]}" "{distinctive[-1]}"')
+
+    # Known-event fallback for stories where the title contains an unusual
+    # place/base/acronym but the summary is sparse.
+    if title:
+        title_terms = re.findall(r"[A-Z][A-Za-z0-9-]{2,}|[А-ЯЁ][А-ЯЁа-яё-]{3,}", title)
+        if len(title_terms) >= 2:
+            queries.append(" ".join(title_terms[:5]))
+
     out, seen = [], set()
-    for query in queries:
-        url = "https://news.google.com/rss/search?q=" + query + "&hl=ru&gl=RU&ceid=RU:ru"
+    for query in queries[:6]:
+        url = "https://news.google.com/rss/search?q=" + requests.utils.quote(query) + "&hl=ru&gl=RU&ceid=RU:ru"
         try:
             r = requests.get(url, timeout=12, headers={"User-Agent":"NOWLY-News-Agent/1.0"})
             r.raise_for_status()
             f = feedparser.parse(r.content)
-            for e in f.entries[:max_items]:
+            for e in f.entries[:8]:
                 t = html.unescape(str(e.get("title","")).strip())
                 l = str(e.get("link","")).strip()
                 sm = html.unescape(str(e.get("summary","") or "").strip())
@@ -700,6 +740,10 @@ def search_related_news(target, max_items=8):
                 if t and l and l != target[1] and key not in seen:
                     seen.add(key)
                     out.append((t,l,sm))
+                    if len(out) >= max_items:
+                        break
+            if len(out) >= max_items:
+                break
         except Exception as e:
             print("RELATED SEARCH ERROR:", repr(e))
     return out[:max_items]
