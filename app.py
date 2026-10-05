@@ -48,7 +48,8 @@ def fetch_news(limit=8):
                 title = html.unescape(e.get("title", ""))
                 link = e.get("link", "")
                 if title and link:
-                    items.append((title, link))
+                    summary = html.unescape(e.get("summary", "") or e.get("description", ""))
+                items.append((title, link, summary))
         except Exception:
             pass
     seen = set()
@@ -60,12 +61,13 @@ def fetch_news(limit=8):
             out.append(x)
     return out[:limit]
 
-def ai_post(title, link):
+def ai_post(title, link, summary=""):
     prompt = f'''Ты главный редактор Telegram-канала NOWLY.
 Твоя задача — полностью перевести новость на русский язык и написать готовый пост для публикации.
 
 Исходный заголовок: {title}
 Источник: {link}
+Краткое содержание из RSS: {summary}
 
 СТРОГИЕ ПРАВИЛА:
 1. Весь текст поста пиши ТОЛЬКО НА РУССКОМ ЯЗЫКЕ.
@@ -95,11 +97,12 @@ def process_news(chat):
         send(chat, "⚠️ Не удалось получить новости. Попробуй ещё раз через минуту.")
         return
     send(chat, "⚡ <b>NOWLY: собираю свежие новости...</b>")
-    for title, link in items[:5]:
+    for title, link, summary in items[:5]:
         try:
-            post = ai_post(title, link)
-        except Exception:
-            post = f"📰 <b>{html.escape(title)}</b>\n\n{link}\n\n⚠️ AI пока не обработал материал."
+            post = ai_post(title, link, summary)
+        except Exception as e:
+            print("AI ERROR:", repr(e))
+            post = f"⚠️ <b>Не удалось обработать новость</b>\n\nИсходный материал получен, но AI-перевод временно недоступен. Новость не публикуется, чтобы не отправлять английский текст.\n\nИсточник: {link}"
         buttons = [[
             {"text": "✅ Опубликовать", "callback_data": "pub"},
             {"text": "❌ Отклонить", "callback_data": "no"}
