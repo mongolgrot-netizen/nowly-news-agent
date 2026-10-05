@@ -574,46 +574,85 @@ def related_items(target, items, max_items=5):
 
 def search_related_news(target, max_items=8):
     # Free cross-source lookup through Google News RSS.
+    # Search by the key facts, not the whole headline, to catch independent reports.
     title = target[0]
-    words = re.findall(r"[а-яёa-z0-9]{5,}", title.lower())
+    summary = target[2] if len(target) > 2 else ""
+    words = re.findall(r"[а-яёa-z0-9]{5,}", f"{title} {summary}".lower())
     stop = {
-        "российский","российская","украинский","украинская","сообщил",
-        "сообщила","заявил","заявила","ужасный","черном","черного",
-        "после","погиб","погибли","новости"
+        "российский","российская","российское","украинский","украинская",
+        "сообщил","сообщила","сообщили","заявил","заявила","после","погиб",
+        "погибли","новости","стало","стали","который","которая","которые",
+        "сегодня","также","время","районе","области"
+    }
+    words = [w for w in words if w not in stop][:9]
+    if not words:
+        return []
+    queries = ["+".join(words[:6]), "+".join(words[:4] + words[-3:])]
+    out, seen = [], set()
+    for query in queries:
+        url = "https://news.google.com/rss/search?q=" + query + "&hl=ru&gl=RU&ceid=RU:ru"
+        try:
+            r = requests.get(url, timeout=12, headers={"User-Agent":"NOWLY-News-Agent/1.0"})
+            r.raise_for_status()
+            f = feedparser.parse(r.content)
+            for e in f.entries[:max_items]:
+                t = html.unescape(str(e.get("title","")).strip())
+                l = str(e.get("link","")).strip()
+                sm = html.unescape(str(e.get("summary","") or "").strip())
+                sm = re.sub(r"<[^>]+>", " ", sm)
+                sm = re.sub(r"\s+", " ", sm).strip()
+                key = l or t.lower()
+                if t and l and l != target[1] and key not in seen:
+                    seen.add(key)
+                    out.append((t,l,sm))
+        except Exception as e:
+            print("RELATED SEARCH ERROR:", repr(e))
+    return out[:max_items]
+
+def search_telegram_news(target, max_items=6):
+    """Find public Russian Telegram reports via Google News RSS.
+    Telegram posts are treated as leads, not automatic confirmation."""
+    title = target[0]
+    summary = target[2] if len(target) > 2 else ""
+    words = re.findall(r"[а-яёa-z0-9]{5,}", f"{title} {summary}".lower())
+    stop = {
+        "российский","российская","российское","украинский","украинская",
+        "сообщил","сообщила","сообщили","заявил","заявила","после","новости",
+        "сегодня","также","который","которая","которые","стало","стали"
     }
     words = [w for w in words if w not in stop][:7]
     if not words:
         return []
-    query = "+".join(words)
-    url = (
-        "https://news.google.com/rss/search?q=" + query +
-        "&hl=ru&gl=RU&ceid=RU:ru"
-    )
-    out = []
-    try:
-        r = requests.get(
-            url,
-            timeout=12,
-            headers={"User-Agent": "NOWLY-News-Agent/1.0"}
-        )
-        r.raise_for_status()
-        f = feedparser.parse(r.content)
-        for e in f.entries[:max_items]:
-            t = html.unescape(str(e.get("title", "")).strip())
-            l = str(e.get("link", "")).strip()
-            sm = html.unescape(str(e.get("summary", "") or "").strip())
-            sm = re.sub(r"<[^>]+>", " ", sm)
-            sm = re.sub(r"\s+", " ", sm).strip()
-            if t and l and l != target[1]:
-                out.append((t, l, sm))
-    except Exception as e:
-        print("RELATED SEARCH ERROR:", repr(e))
-    return out
+    queries = [
+        "site:t.me " + " ".join(words[:5]),
+        "site:telegram.me " + " ".join(words[:5])
+    ]
+    out, seen = [], set()
+    for q in queries:
+        url = "https://news.google.com/rss/search?q=" + requests.utils.quote(q) + "&hl=ru&gl=RU&ceid=RU:ru"
+        try:
+            r = requests.get(url, timeout=12, headers={"User-Agent":"NOWLY-News-Agent/1.0"})
+            r.raise_for_status()
+            f = feedparser.parse(r.content)
+            for e in f.entries[:max_items]:
+                t = html.unescape(str(e.get("title","")).strip())
+                l = str(e.get("link","")).strip()
+                sm = html.unescape(str(e.get("summary","") or "").strip())
+                sm = re.sub(r"<[^>]+>", " ", sm)
+                sm = re.sub(r"\s+", " ", sm).strip()
+                key = l or t.lower()
+                if t and l and ("t.me/" in l or "telegram.me/" in l) and key not in seen:
+                    seen.add(key)
+                    out.append((t,l,sm))
+        except Exception as e:
+            print("TELEGRAM SEARCH ERROR:", repr(e))
+    return out[:max_items]
 
-def fact_check(target, related):
-    if not related:
-        return {"status":"single_source","reason":"Других материалов об этом событии не найдено.","safe_facts":[],"disputed_facts":[],"source_indexes":[0]}
-    sources = [target] + related[:4]
+def fact_check(target, related, telegram_sources=None):
+    telegram_sources = telegram_sources or []
+    if not related and not telegram_sources:
+        return {"status":"single_source","reason":"Других независимых материалов об этом событии не найдено.","safe_facts":[],"disputed_facts":[],"source_indexes":[0],"telegram_first":False,"telegram_primary":False,"recommendation":"hold"}
+    sources = [target] + related[:4] + telegram_sources[:3]
     material = []
     for i, item in enumerate(sources):
         title, link, summary, *rest = item
@@ -643,6 +682,13 @@ def fact_check(target, related):
 - Если официальный орган подтверждает само происшествие, но не подтверждает его причину, это partial_confirmed, а причина должна быть disputed_facts.
 - Не придумывай факты.
 - Для военных конфликтов особенно строго отделяй заявления сторон от подтвержденных сведений.
+- Отдельно анализируй Telegram-источники: если публичный российский Telegram-канал опубликовал информацию раньше других найденных источников, это можно отметить как "первым сообщил", но это НЕ означает подтверждение.
+- Если Telegram является единственным источником существенного факта, статус не должен становиться confirmed.
+- Если Telegram содержит только слух/анонимное утверждение без подтверждения, рекомендация = hold.
+- Если независимые источники подтверждают событие, а Telegram лишь сообщил первым, recommendation = publish и telegram_first = true.
+- Если источники существенно расходятся или нет достаточной проверки, recommendation = hold.
+- Никогда не считай копии одного Telegram-сообщения независимыми источниками.
+- Верни дополнительные поля: "telegram_first":true|false, "telegram_primary":true|false, "recommendation":"publish|hold".
 
 Материалы:
 """ + "\n\n".join(material)
@@ -666,7 +712,10 @@ def fact_check(target, related):
         "reason": "Не удалось автоматически получить независимые подтверждения.",
         "safe_facts": [],
         "disputed_facts": [],
-        "source_indexes": [0]
+        "source_indexes": [0],
+        "telegram_first": False,
+        "telegram_primary": False,
+        "recommendation": "hold"
     }
 
 def ai_post(title, link, summary="", category="news", fact=None, sources=None):
@@ -742,6 +791,7 @@ def process_news(chat, category="news", region=None):
         try:
             related = related_items((title, link, summary, region), items)
             searched = search_related_news((title, link, summary, region))
+            telegram_sources = search_telegram_news((title, link, summary, region))
             # Merge and deduplicate by URL/title.
             pool = related + searched
             seen = set()
@@ -753,7 +803,7 @@ def process_news(chat, category="news", region=None):
                     merged.append(item)
             related = merged[:8]
 
-            fact = fact_check((title, link, summary, region), related)
+            fact = fact_check((title, link, summary, region), related, telegram_sources)
             labels = {
                 "confirmed": "🟢 подтверждено",
                 "partial_confirmed": "🟠 частично подтверждено",
@@ -761,13 +811,22 @@ def process_news(chat, category="news", region=None):
                 "conflict": "🔴 источники расходятся",
                 "single_source": "⚪ один источник"
             }
-            send(chat, f"🔎 Проверка: {labels.get(fact.get('status'), '⚪ не определено')}\n{fact.get('reason','')[:700]}")
+            tg_first = "да" if fact.get("telegram_first") else "нет"
+            tg_primary = "да" if fact.get("telegram_primary") else "нет"
+            recommendation = fact.get("recommendation", "hold")
+            rec_label = "🟢 рекомендовано к публикации" if recommendation == "publish" else "🔴 лучше НЕ публиковать"
+            send(chat, f"🔎 Проверка: {labels.get(fact.get('status'), '⚪ не определено')}\n"
+                       f"{rec_label}\n"
+                       f"Telegram первым: {tg_first} • Telegram — основной источник: {tg_primary}\n"
+                       f"{fact.get('reason','')[:700]}")
 
-            source_list = [(title, link)] + [(x[0], x[1]) for x in related[:5]]
+            source_list = [(title, link)] + [(x[0], x[1]) for x in related[:5]] + [(x[0], x[1]) for x in telegram_sources[:3]]
             post = ai_post(
                 title, link, summary + f"\nРегион: {region}", category, fact,
                 source_list
             )
+            if fact.get("recommendation") == "hold":
+                post += "\n\n⚠️ Редактор: публикация рекомендуется только после дополнительной проверки."
         except Exception as e:
             print("AI ERROR:", repr(e))
             post = (
