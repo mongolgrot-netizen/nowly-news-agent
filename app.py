@@ -190,9 +190,6 @@ def select_news(items, category="news"):
         )
 
     category_name = CATEGORIES.get(category, "📰 Новости")
-    fact = fact or {}
-    fact_status = fact.get("status", "single_source")
-    fact_reason = fact.get("reason", "")
     prompt = f"""Ты главный редактор Telegram-канала NOWLY.
 Выбери самые интересные материалы именно для рубрики {category_name}.
 
@@ -284,6 +281,9 @@ def fact_check(target, related):
 
 def ai_post(title, link, summary="", category="news", fact=None):
     category_name = CATEGORIES.get(category, "📰 Новости")
+    fact = fact or {}
+    fact_status = fact.get("status", "single_source")
+    fact_reason = fact.get("reason", "")
     prompt = f"""Ты главный редактор Telegram-канала NOWLY.
 Напиши готовый короткий пост для рубрики {category_name} на русском языке.
 
