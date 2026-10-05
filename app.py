@@ -33,7 +33,7 @@ def setup_webhook():
         print("Webhook setup error:", e)
 
 def send(chat, text, buttons=None):
-    data = {"chat_id": chat, "text": text, "parse_mode": "HTML", "disable_web_page_preview": "false"}
+    data = {"chat_id": chat, "text": text, "disable_web_page_preview": "false"}
     if buttons:
         import json
         data["reply_markup"] = json.dumps({"inline_keyboard": buttons})
@@ -88,7 +88,7 @@ def process_news(chat):
         except Exception:
             post = f"📰 <b>{html.escape(title)}</b>\n\n{link}\n\n⚠️ AI пока не обработал материал."
         buttons = [[
-            {"text": "✅ Опубликовать", "callback_data": "pub:" + link[:180]},
+            {"text": "✅ Опубликовать", "callback_data": "pub"},
             {"text": "❌ Отклонить", "callback_data": "no"}
         ]]
         send(chat, post, buttons)
@@ -111,12 +111,11 @@ def handle_update(u):
         chat = q["message"]["chat"]["id"]
         if ADMIN_ID and str(chat) != str(ADMIN_ID):
             return
-        if q["data"].startswith("pub:"):
+        if q["data"] == "pub":
             text = q["message"]["text"]
             result = tg("sendMessage", {
                 "chat_id": CHANNEL,
                 "text": text,
-                "parse_mode": "HTML",
                 "disable_web_page_preview": "false"
             })
             if result and result.get("ok"):
