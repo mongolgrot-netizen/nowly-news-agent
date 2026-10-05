@@ -853,7 +853,7 @@ def process_news(chat, category="news", region=None):
         if not post:
             post = f"📰 {title}\n\n{summary[:900]}\n\nИсточник: {link}\n\n⚠️ Черновик требует ручной проверки."
         if recommendation == "hold":
-            post += "\n\n⚠️ Редактор: публикация рекомендуется только после дополнительной проверки."
+            send(chat, "⚠️ Редактор: публикация рекомендуется только после дополнительной проверки. Решение о публикации остаётся за администратором.")
     except Exception as e:
         print("AI ERROR:", repr(e))
         post = (
