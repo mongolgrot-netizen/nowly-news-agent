@@ -544,9 +544,9 @@ def select_news(items, category="news", region=None):
             break
 
     if not selected:
-        return items[:3]
+        return items[:1]
 
-    return [items[i] for i in selected]
+    return [items[i] for i in selected[:1]]
 
 
 def related_items(target, items, max_items=5):
@@ -821,10 +821,20 @@ def process_news(chat, category="news", region=None):
                        f"{fact.get('reason','')[:700]}")
 
             source_list = [(title, link)] + [(x[0], x[1]) for x in related[:5]] + [(x[0], x[1]) for x in telegram_sources[:3]]
-            post = ai_post(
-                title, link, summary + f"\nРегион: {region}", category, fact,
-                source_list
-            )
+            try:
+                post = ai_post(
+                    title, link, summary + f"\nРегион: {region}", category, fact,
+                    source_list
+                )
+            except Exception as ai_error:
+                print("AI POST FALLBACK:", repr(ai_error))
+                post = (
+                    f"📰 {title}\n\n"
+                    f"{summary[:900]}\n\n"
+                    f"Источник: {link}\n\n"
+                    "⚠️ AI-редактор временно недоступен. Черновик не считается проверенным; "
+                    "перед публикацией проверь источник вручную."
+                )
             if fact.get("recommendation") == "hold":
                 post += "\n\n⚠️ Редактор: публикация рекомендуется только после дополнительной проверки."
         except Exception as e:
