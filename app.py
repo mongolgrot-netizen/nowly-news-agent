@@ -24,9 +24,33 @@ RSS_BY_CATEGORY = {
         "https://feeds.bbci.co.uk/news/world/rss.xml",
         "https://news.google.com/rss/search?q=мир+международные+новости&hl=ru&gl=RU&ceid=RU:ru",
     ],
+    "russia": [
+        "https://news.google.com/rss/search?q=Россия+федеральные+новости&hl=ru&gl=RU&ceid=RU:ru",
+        "https://news.google.com/rss/search?q=Россия+правительство+госдума+федеральные+новости&hl=ru&gl=RU&ceid=RU:ru",
+    ],
+    "events": [
+        "https://news.google.com/rss/search?q=события+Россия+сегодня&hl=ru&gl=RU&ceid=RU:ru",
+        "https://news.google.com/rss/search?q=события+мир+сегодня&hl=ru&gl=RU&ceid=RU:ru",
+    ],
     "incidents": [
         "https://news.google.com/rss/search?q=происшествия+катастрофа+пожар+авария&hl=ru&gl=RU&ceid=RU:ru",
         "https://feeds.bbci.co.uk/news/world/rss.xml",
+    ],
+    "emergency": [
+        "https://news.google.com/rss/search?q=экстренно+срочно+ЧП+происшествие&hl=ru&gl=RU&ceid=RU:ru",
+        "https://news.google.com/rss/search?q=МЧС+экстренные+новости+Россия&hl=ru&gl=RU&ceid=RU:ru",
+    ],
+    "crime": [
+        "https://news.google.com/rss/search?q=криминал+преступление+полиция+СК+прокуратура&hl=ru&gl=RU&ceid=RU:ru",
+        "https://news.google.com/rss/search?q=задержан+арест+уголовное+дело+Россия&hl=ru&gl=RU&ceid=RU:ru",
+    ],
+    "wanted": [
+        "https://news.google.com/rss/search?q=розыск+пропал+без+вести+помогите+найти+человека&hl=ru&gl=RU&ceid=RU:ru",
+        "https://news.google.com/rss/search?q=разыскивается+пропавший+человек+МВД&hl=ru&gl=RU&ceid=RU:ru",
+    ],
+    "kremlin": [
+        "https://news.google.com/rss/search?q=site%3Akremlin.ru+Президент+Россия+Путин&hl=ru&gl=RU&ceid=RU:ru",
+        "https://news.google.com/rss/search?q=site%3Akremlin.ru+Кремль+сегодня&hl=ru&gl=RU&ceid=RU:ru",
     ],
     "conflicts": [
         "https://news.google.com/rss/search?q=Россия+Украина+СВО+конфликт+война&hl=ru&gl=RU&ceid=RU:ru",
@@ -54,10 +78,32 @@ RSS_BY_CATEGORY = {
     ],
 }
 
+# Region search phrases. They are used with Google News RSS, so the same
+# editorial engine can work for federal, district and individual regions.
+REGION_QUERIES = {
+    "Москва и МО": "Москва Московская область",
+    "Санкт-Петербург и ЛО": "Санкт-Петербург Ленинградская область",
+    "ЦФО": "Центральный федеральный округ Россия",
+    "СЗФО": "Северо-Западный федеральный округ Россия",
+    "ЮФО": "Южный федеральный округ Россия",
+    "СКФО": "Северо-Кавказский федеральный округ Россия",
+    "ПФО": "Приволжский федеральный округ Россия",
+    "УФО": "Уральский федеральный округ Россия",
+    "СФО": "Сибирский федеральный округ Россия",
+    "ДФО": "Дальневосточный федеральный округ Россия",
+}
+
+
 CATEGORIES = {
     "news": "📰 Новости",
     "world": "🌍 Мир",
+    "russia": "🇷🇺 Россия — федеральные",
+    "events": "📡 События",
     "incidents": "🚨 Происшествия",
+    "emergency": "⚡ Экстренно",
+    "crime": "🕵️ Криминал",
+    "wanted": "🔎 Внимание: розыск",
+    "kremlin": "🏛 Кремль",
     "conflicts": "⚔️ СВО / конфликты",
     "tech": "🤖 ИИ / технологии",
     "economy": "💰 Экономика",
@@ -66,6 +112,9 @@ CATEGORIES = {
     "history": "🏛 История",
     "trends": "🔥 Тренды",
 }
+
+REGION_NAMES = list(REGION_QUERIES.keys())
+
 
 def tg(method, data):
     if not TOKEN:
@@ -100,9 +149,31 @@ def send(chat, text, buttons=None):
         data["reply_markup"] = json.dumps({"inline_keyboard": buttons}, ensure_ascii=False)
     return tg("sendMessage", data)
 
-def fetch_news(category="news", limit=30):
+def fetch_news(category="news", limit=30, region=None):
     items = []
-    urls = RSS_BY_CATEGORY.get(category, RSS_BY_CATEGORY["news"])
+    urls = list(RSS_BY_CATEGORY.get(category, RSS_BY_CATEGORY["news"]))
+
+    # Regional mode: add several free Google News RSS searches for the
+    # requested region. We keep the base category feeds too, so a regional
+    # editor can compare local stories with federal/world coverage.
+    if region and region in REGION_QUERIES:
+        rq = REGION_QUERIES[region]
+        base_terms = {
+            "news": "новости",
+            "russia": "Россия",
+            "events": "события",
+            "incidents": "происшествия ЧП авария пожар",
+            "emergency": "экстренно срочно ЧП",
+            "crime": "криминал преступление полиция",
+            "wanted": "розыск пропал человек",
+            "conflicts": "конфликт СВО",
+        }
+        terms = base_terms.get(category, "новости")
+        q = "+".join((rq + " " + terms).split())
+        urls.insert(0, "https://news.google.com/rss/search?q=" + q + "&hl=ru&gl=RU&ceid=RU:ru")
+        q2 = "+".join((rq + " " + terms + " сегодня").split())
+        urls.insert(1, "https://news.google.com/rss/search?q=" + q2 + "&hl=ru&gl=RU&ceid=RU:ru")
+
     for url in urls:
         try:
             r = requests.get(
@@ -136,17 +207,37 @@ def fetch_news(category="news", limit=30):
 
 def menu_keyboard():
     return [
-        [{"text": "📰 Новости"}, {"text": "🌍 Мир"}, {"text": "🚨 Происшествия"}],
+        [{"text": "📰 Новости"}, {"text": "🌍 Мир"}, {"text": "🇷🇺 Россия"}],
+        [{"text": "📡 События"}, {"text": "🚨 Происшествия"}, {"text": "⚡ Экстренно"}],
+        [{"text": "🕵️ Криминал"}, {"text": "🔎 Розыск"}, {"text": "🏛 Кремль"}],
         [{"text": "⚔️ СВО / конфликты"}, {"text": "🤖 ИИ / технологии"}],
         [{"text": "💰 Экономика"}, {"text": "🚗 Авто"}, {"text": "🔥 Тренды"}],
         [{"text": "😂 Юмор"}, {"text": "🏛 История"}],
-        [{"text": "ℹ️ Статус"}]
+        [{"text": "🗺 Россия по регионам"}, {"text": "ℹ️ Статус"}]
+    ]
+
+def region_keyboard():
+    return [
+        [{"text": "🇷🇺 Федеральные новости"}],
+        [{"text": "📍 Москва и МО"}, {"text": "📍 Санкт-Петербург и ЛО"}],
+        [{"text": "📍 ЦФО"}, {"text": "📍 СЗФО"}, {"text": "📍 ЮФО"}],
+        [{"text": "📍 СКФО"}, {"text": "📍 ПФО"}, {"text": "📍 УФО"}],
+        [{"text": "📍 СФО"}, {"text": "📍 ДФО"}],
+        [{"text": "↩️ Главное меню"}]
+    ]
+
+def region_category_keyboard(region):
+    return [
+        [{"text": f"📰 Новости — {region}"}, {"text": f"🚨 Происшествия — {region}"}],
+        [{"text": f"⚡ Экстренно — {region}"}, {"text": f"🕵️ Криминал — {region}"}],
+        [{"text": f"🔎 Розыск — {region}"}, {"text": f"📡 События — {region}"}],
+        [{"text": f"↩️ Регионы"}]
     ]
 
 def send_menu(chat):
     tg("sendMessage", {
         "chat_id": chat,
-        "text": "⚡ NOWLY AI EDITOR\n\nВыбери направление. Я найду свежие материалы именно по этой теме, отберу лучшие и подготовлю посты на проверку.\n\nКанал один — темы разделены на уровне редактора, поэтому позже не придётся плодить десятки каналов.",
+        "text": "⚡ NOWLY AI EDITOR\n\nВыбери направление. Теперь можно отдельно искать и готовить публикации по миру, России, федеральным новостям, регионам, событиям, происшествиям, экстренным сообщениям, криминалу, розыску и официальным новостям Кремля.\n\nВсе материалы проходят редакторскую проверку перед публикацией.",
         "reply_markup": json.dumps({
             "keyboard": menu_keyboard(),
             "resize_keyboard": True,
@@ -177,7 +268,7 @@ def groq(prompt, temperature=0.2, max_tokens=500):
         except Exception: detail = r.text
         raise RuntimeError(f"Groq HTTP {r.status_code}: {detail[:500]}")
     raise RuntimeError("Groq: превышен лимит запросов")
-def select_news(items, category="news"):
+def select_news(items, category="news", region=None):
     candidates = []
     for i, (title, link, summary) in enumerate(items):
         candidates.append(
@@ -185,10 +276,13 @@ def select_news(items, category="news"):
         )
 
     category_name = CATEGORIES.get(category, "📰 Новости")
+    region_line = f"Региональная привязка: {region}. Отбирай прежде всего материалы, относящиеся к этому региону." if region else "Региональная привязка отсутствует: отбирай материалы федерального или международного масштаба в рамках рубрики."
     prompt = f"""Ты главный редактор Telegram-канала NOWLY.
 Выбери самые интересные материалы именно для рубрики {category_name}.
 
 Приоритет этой рубрики: релевантность теме, свежесть, общественный интерес и понятность массовой аудитории.
+{region_line}
+Для рубрик «розыск» и «помогите найти человека» не придумывай персональные данные и не меняй факты из источника.
 Для СВО/конфликтов особенно важно отделять подтвержденные факты от заявлений сторон и не выдавать утверждения одной стороны за установленный факт.
 Для юмора и трендов выбирай действительно интересные и массовые истории, а не случайный мусор.
 Для истории выбирай факты, события и находки с понятной исторической ценностью.
@@ -380,21 +474,22 @@ def ai_post(title, link, summary="", category="news", fact=None, sources=None):
 """
     return groq(prompt, 0.3, 450)
 
-def process_news(chat, category="news"):
+def process_news(chat, category="news", region=None):
     category_name = CATEGORIES.get(category, "📰 Новости")
-    send(chat, f"⚡ NOWLY: ищу свежие материалы — {category_name}...")
-    items = fetch_news(category)
+    scope = f" • {region}" if region else ""
+    send(chat, f"⚡ NOWLY: ищу свежие материалы — {category_name}{scope}...")
+    items = fetch_news(category, region=region)
     if not items:
         send(chat, "⚠️ Не удалось получить свежие новости. Попробуй ещё раз через минуту.")
         return
 
     try:
-        selected = select_news(items, category)
+        selected = select_news(items, category, region)
     except Exception as e:
         print("SELECT ERROR:", repr(e))
         selected = items[:3]
 
-    send(chat, f"🧠 NOWLY: отобрано материалов: {len(selected)} из {len(items)}")
+    send(chat, f"🧠 NOWLY: отобрано материалов: {len(selected)} из {len(items)}" + (f"\n🗺 Регион: {region}" if region else ""))
 
     for title, link, summary in selected:
         try:
@@ -454,12 +549,66 @@ def handle_update(u):
 
         if text.startswith("/start") or text == "ℹ️ Статус":
             send_menu(chat)
+        elif text == "🗺 Россия по регионам":
+            tg("sendMessage", {
+                "chat_id": chat,
+                "text": "🗺 РОССИЯ ПО РЕГИОНАМ\n\nВыбери федеральный уровень или региональный блок:",
+                "reply_markup": json.dumps({"keyboard": region_keyboard(), "resize_keyboard": True}, ensure_ascii=False)
+            })
+        elif text == "🇷🇺 Россия":
+            threading.Thread(target=process_news, args=(chat, "russia"), daemon=True).start()
+        elif text == "🇷🇺 Федеральные новости":
+            threading.Thread(target=process_news, args=(chat, "russia"), daemon=True).start()
+        elif text == "↩️ Главное меню":
+            send_menu(chat)
+        elif text == "↩️ Регионы":
+            tg("sendMessage", {
+                "chat_id": chat,
+                "text": "🗺 Выбери регион:",
+                "reply_markup": json.dumps({"keyboard": region_keyboard(), "resize_keyboard": True}, ensure_ascii=False)
+            })
+        elif text.startswith("📍 "):
+            region = text[3:].strip()
+            if region in REGION_QUERIES:
+                tg("sendMessage", {
+                    "chat_id": chat,
+                    "text": f"🗺 {region}\n\nВыбери тип материалов:",
+                    "reply_markup": json.dumps({"keyboard": region_category_keyboard(region), "resize_keyboard": True}, ensure_ascii=False)
+                })
+        elif text.startswith("📰 Новости — "):
+            region = text[len("📰 Новости — "):]
+            threading.Thread(target=process_news, args=(chat, "news", region), daemon=True).start()
+        elif text.startswith("🚨 Происшествия — "):
+            region = text[len("🚨 Происшествия — "):]
+            threading.Thread(target=process_news, args=(chat, "incidents", region), daemon=True).start()
+        elif text.startswith("⚡ Экстренно — "):
+            region = text[len("⚡ Экстренно — "):]
+            threading.Thread(target=process_news, args=(chat, "emergency", region), daemon=True).start()
+        elif text.startswith("🕵️ Криминал — "):
+            region = text[len("🕵️ Криминал — "):]
+            threading.Thread(target=process_news, args=(chat, "crime", region), daemon=True).start()
+        elif text.startswith("🔎 Розыск — "):
+            region = text[len("🔎 Розыск — "):]
+            threading.Thread(target=process_news, args=(chat, "wanted", region), daemon=True).start()
+        elif text.startswith("📡 События — "):
+            region = text[len("📡 События — "):]
+            threading.Thread(target=process_news, args=(chat, "events", region), daemon=True).start()
         elif text.startswith("/news") or text == "📰 Новости":
             threading.Thread(target=process_news, args=(chat, "news"), daemon=True).start()
         elif text == "🌍 Мир":
             threading.Thread(target=process_news, args=(chat, "world"), daemon=True).start()
+        elif text == "📡 События":
+            threading.Thread(target=process_news, args=(chat, "events"), daemon=True).start()
         elif text == "🚨 Происшествия":
             threading.Thread(target=process_news, args=(chat, "incidents"), daemon=True).start()
+        elif text == "⚡ Экстренно":
+            threading.Thread(target=process_news, args=(chat, "emergency"), daemon=True).start()
+        elif text == "🕵️ Криминал":
+            threading.Thread(target=process_news, args=(chat, "crime"), daemon=True).start()
+        elif text == "🔎 Розыск":
+            threading.Thread(target=process_news, args=(chat, "wanted"), daemon=True).start()
+        elif text == "🏛 Кремль":
+            threading.Thread(target=process_news, args=(chat, "kremlin"), daemon=True).start()
         elif text == "⚔️ СВО / конфликты":
             threading.Thread(target=process_news, args=(chat, "conflicts"), daemon=True).start()
         elif text == "🤖 ИИ / технологии":
