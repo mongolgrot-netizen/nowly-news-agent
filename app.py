@@ -10,6 +10,7 @@ CHANNEL = os.getenv("TELEGRAM_CHANNEL", "@Paramitaplus")
 GROQ_KEY = os.getenv("GROQ_API_KEY", "")
 MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "").rstrip("/")
+HISTORY_MODE = {}  # chat_id -> ("world"|"russia"|"region_select"|"region", region)
 
 RSS_BY_CATEGORY = {
     "news": [
@@ -774,6 +775,13 @@ def handle_update(u):
             threading.Thread(target=process_news, args=(chat, "russia"), daemon=True).start()
         elif text == "↩️ Главное меню":
             send_menu(chat)
+        elif text == "↩️ История":
+            HISTORY_MODE.pop(chat, None)
+            tg("sendMessage", {
+                "chat_id": chat,
+                "text": "🏛 ИСТОРИЯ\n\nВыбери формат:",
+                "reply_markup": json.dumps({"keyboard": history_keyboard(), "resize_keyboard": True, "is_persistent": True}, ensure_ascii=False)
+            })
         elif text == "↩️ Регионы":
             tg("sendMessage", {
                 "chat_id": chat,
@@ -783,11 +791,19 @@ def handle_update(u):
         elif text.startswith("📍 "):
             region = text[3:].strip()
             if region in REGION_QUERIES:
-                tg("sendMessage", {
-                    "chat_id": chat,
-                    "text": f"🗺 {region}\n\nВыбери тип материалов:",
-                    "reply_markup": json.dumps({"keyboard": region_category_keyboard(region), "resize_keyboard": True}, ensure_ascii=False)
-                })
+                if HISTORY_MODE.get(chat) == ("region_select", None):
+                    HISTORY_MODE[chat] = ("region", region)
+                    tg("sendMessage", {
+                        "chat_id": chat,
+                        "text": f"🗺 ИСТОРИЯ — {region}\n\nВведи год, например: 1753",
+                        "reply_markup": json.dumps({"keyboard": [[{"text":"↩️ История"}]],"resize_keyboard":True}, ensure_ascii=False)
+                    })
+                else:
+                    tg("sendMessage", {
+                        "chat_id": chat,
+                        "text": f"🗺 {region}\n\nВыбери тип материалов:",
+                        "reply_markup": json.dumps({"keyboard": region_category_keyboard(region), "resize_keyboard": True}, ensure_ascii=False)
+                    })
         elif text.startswith("📰 Новости — "):
             region = text[len("📰 Новости — "):]
             threading.Thread(target=process_news, args=(chat, "news", region), daemon=True).start()
@@ -853,18 +869,21 @@ def handle_update(u):
                 "reply_markup": json.dumps({"keyboard": history_scope_keyboard(), "resize_keyboard": True}, ensure_ascii=False)
             })
         elif text == "🇷🇺 История России":
+            HISTORY_MODE[chat] = ("russia", None)
             tg("sendMessage", {
                 "chat_id": chat,
                 "text": "🇷🇺 Введи год, например: 1753",
                 "reply_markup": json.dumps({"keyboard": [[{"text":"↩️ История"}]],"resize_keyboard":True}, ensure_ascii=False)
             })
         elif text == "🌍 История мира":
+            HISTORY_MODE[chat] = ("world", None)
             tg("sendMessage", {
                 "chat_id": chat,
                 "text": "🌍 Введи год, например: 1753",
                 "reply_markup": json.dumps({"keyboard": [[{"text":"↩️ История"}]],"resize_keyboard":True}, ensure_ascii=False)
             })
         elif text == "🗺 История по регионам":
+            HISTORY_MODE[chat] = ("region_select", None)
             tg("sendMessage", {
                 "chat_id": chat,
                 "text": "🗺 Выбери регион:",
@@ -872,18 +891,15 @@ def handle_update(u):
             })
         elif text == "🔥 Тренды":
             threading.Thread(target=process_news, args=(chat, "trends"), daemon=True).start()
-        elif text == "🇷🇺 Россия":
-            tg("sendMessage", {
-                "chat_id": chat,
-                "text": "🇷🇺 Введи год для этого дня, например: 1753",
-                "reply_markup": json.dumps({"keyboard": [[{"text":"↩️ История"}]],"resize_keyboard":True}, ensure_ascii=False)
-            })
-        elif text == "🌍 Мир":
-            tg("sendMessage", {
-                "chat_id": chat,
-                "text": "🌍 Введи год для этого дня, например: 1753",
-                "reply_markup": json.dumps({"keyboard": [[{"text":"↩️ История"}]],"resize_keyboard":True}, ensure_ascii=False)
-            })
+                elif re.fullmatch(r"\d{4}", text.strip()) and chat in HISTORY_MODE:
+            mode = HISTORY_MODE.pop(chat)
+            year = int(text.strip())
+            if 1 <= year <= 2100:
+                scope = mode[0]
+                region = mode[1] if len(mode) > 1 else None
+                threading.Thread(target=history_day, args=(chat, year, scope, region), daemon=True).start()
+            else:
+                send(chat, "⚠️ Введи корректный год, например: 1753.")
         elif text.startswith("/status"):
             send(chat, "🟢 NOWLY AI Editor работает.", menu_keyboard())
 
