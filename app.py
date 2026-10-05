@@ -483,19 +483,19 @@ def send_menu(chat):
 def groq(prompt, temperature=0.2, max_tokens=500):
     if not GROQ_KEY:
         raise RuntimeError("GROQ_API_KEY не задан в Render Environment Variables")
-    for attempt in range(3):
+    for attempt in range(4):
         r = requests.post("https://api.groq.com/openai/v1/chat/completions",
             headers={"Authorization": f"Bearer {GROQ_KEY}", "Content-Type": "application/json"},
             json={"model": MODEL, "messages": [{"role": "user", "content": prompt}], "temperature": temperature, "max_tokens": max_tokens},
             timeout=45)
         if r.ok:
             return r.json()["choices"][0]["message"]["content"].strip()
-        if r.status_code == 429 and attempt < 2:
-            wait = 3
+        if r.status_code == 429 and attempt < 3:
+            wait = 6
             try:
                 msg = r.json().get("error", {}).get("message", "")
                 m = re.search(r"(?:in|after) ([0-9.]+)s", msg)
-                if m: wait = min(max(float(m.group(1)) + 1, 2), 15)
+                if m: wait = min(max(float(m.group(1)) + 1, 6), 30)
             except Exception: pass
             time.sleep(wait)
             continue
