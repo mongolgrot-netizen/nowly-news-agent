@@ -1,4 +1,4 @@
-import os, html, threading, json, re
+import os, html, threading, json, re, time
 from flask import Flask, request, jsonify
 import requests, feedparser
 
@@ -154,39 +154,34 @@ def send_menu(chat):
         }, ensure_ascii=False)
     })
 
-def groq(prompt, temperature=0.2):
+def groq(prompt, temperature=0.2, max_tokens=500):
     if not GROQ_KEY:
         raise RuntimeError("GROQ_API_KEY не задан в Render Environment Variables")
-
-    r = requests.post(
-        "https://api.groq.com/openai/v1/chat/completions",
-        headers={
-            "Authorization": f"Bearer {GROQ_KEY}",
-            "Content-Type": "application/json"
-        },
-        json={
-            "model": MODEL,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": temperature
-        },
-        timeout=45
-    )
-
-    if not r.ok:
-        try:
-            detail = r.json().get("error", {}).get("message", r.text)
-        except Exception:
-            detail = r.text
+    for attempt in range(3):
+        r = requests.post("https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {GROQ_KEY}", "Content-Type": "application/json"},
+            json={"model": MODEL, "messages": [{"role": "user", "content": prompt}], "temperature": temperature, "max_tokens": max_tokens},
+            timeout=45)
+        if r.ok:
+            return r.json()["choices"][0]["message"]["content"].strip()
+        if r.status_code == 429 and attempt < 2:
+            wait = 3
+            try:
+                msg = r.json().get("error", {}).get("message", "")
+                m = re.search(r"(?:in|after) ([0-9.]+)s", msg)
+                if m: wait = min(max(float(m.group(1)) + 1, 2), 15)
+            except Exception: pass
+            time.sleep(wait)
+            continue
+        try: detail = r.json().get("error", {}).get("message", r.text)
+        except Exception: detail = r.text
         raise RuntimeError(f"Groq HTTP {r.status_code}: {detail[:500]}")
-
-    data = r.json()
-    return data["choices"][0]["message"]["content"].strip()
-
+    raise RuntimeError("Groq: превышен лимит запросов")
 def select_news(items, category="news"):
     candidates = []
     for i, (title, link, summary) in enumerate(items):
         candidates.append(
-            f"[{i}] {title}\nОписание: {summary[:700]}\nИсточник: {link}"
+            f"[{i}] {title}\nОписание: {summary[:350]}\nИсточник: {link}"
         )
 
     category_name = CATEGORIES.get(category, "📰 Новости")
@@ -202,20 +197,20 @@ def select_news(items, category="news"):
 Не выбирай скучные второстепенные сообщения.
 Не придумывай факты.
 
-Верни ТОЛЬКО номера выбранных материалов через запятую, максимум 3 номера.
+Верни ТОЛЬКО номера выбранных материалов через запятую, максимум 2 номера.
 Пример: 4,1,7
 
 Материалы:
 """ + "\n\n".join(candidates)
 
-    raw = groq(prompt, 0.1)
+    raw = groq(prompt, 0.1, 250)
     nums = re.findall(r"\d+", raw)
     selected = []
     for n in nums:
         i = int(n)
         if 0 <= i < len(items) and i not in selected:
             selected.append(i)
-        if len(selected) >= 3:
+        if len(selected) >= 2:
             break
 
     if not selected:
@@ -286,7 +281,9 @@ def search_related_news(target, max_items=8):
     return out
 
 def fact_check(target, related):
-    sources = [target] + related
+    if not related:
+        return {"status":"single_source","reason":"Других материалов об этом событии не найдено.","safe_facts":[],"disputed_facts":[],"source_indexes":[0]}
+    sources = [target] + related[:4]
     material = []
     for i, (title, link, summary) in enumerate(sources):
         material.append(
@@ -320,7 +317,7 @@ def fact_check(target, related):
 """ + "\n\n".join(material)
 
     try:
-        raw = groq(prompt, 0.0)
+        raw = groq(prompt, 0.0, 350)
         match = re.search(r"\{.*\}", raw, re.S)
         if match:
             data = json.loads(match.group(0))
@@ -349,7 +346,7 @@ def ai_post(title, link, summary="", category="news", fact=None, sources=None):
     safe_facts = fact.get("safe_facts", [])
     disputed = fact.get("disputed_facts", [])
     source_lines = []
-    for src in (sources or []):
+    for src in (sources or [])[:3]:
         if len(src) >= 2:
             source_lines.append(f"- {src[0]} — {src[1]}")
     prompt = f"""Ты главный редактор Telegram-канала NOWLY.
@@ -358,7 +355,7 @@ def ai_post(title, link, summary="", category="news", fact=None, sources=None):
 Основной материал:
 Заголовок: {title}
 Источник: {link}
-Описание: {summary}
+Описание: {summary[:500]}
 
 Результат фактчека:
 Статус: {fact_status}
@@ -381,7 +378,7 @@ def ai_post(title, link, summary="", category="news", fact=None, sources=None):
 Дополнительные материалы:
 {chr(10).join(source_lines)}
 """
-    return groq(prompt, 0.3)
+    return groq(prompt, 0.3, 450)
 
 def process_news(chat, category="news"):
     category_name = CATEGORIES.get(category, "📰 Новости")
