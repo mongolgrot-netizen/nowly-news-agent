@@ -505,6 +505,8 @@ Wikimedia / Wikipedia: ссылки календарных материалов
               + "\n\n📚 Источник: Wikimedia / Wikipedia.")
         send(chat, "⚠️ Исторический материал собран без AI-редактора. Автоматическая публикация заблокирована: сначала проверь факты вручную.")
         send(chat,post,[[{"text":"❌ Отклонить","callback_data":"no"}]])
+        return
+    send(chat,post,[[{"text":"✅ Опубликовать","callback_data":"pub"},{"text":"❌ Отклонить","callback_data":"no"}]])
 
 def world_keyboard():
     return [
