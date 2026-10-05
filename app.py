@@ -869,6 +869,241 @@ def process_news(chat, category="news", region=None):
     ]]
     send(chat, post, buttons)
 
+def handle_update(u):
+    if "message" in u:
+        m = u["message"]
+        chat = m["chat"]["id"]
+        text = m.get("text", "")
+
+        if ADMIN_ID and str(chat) != str(ADMIN_ID):
+            return
+
+        if text.startswith("/start") or text == "ℹ️ Статус":
+            send_menu(chat)
+        elif text == "🗺 Новости по регионам":
+            tg("sendMessage", {
+                "chat_id": chat,
+                "text": "🗺 РОССИЯ ПО РЕГИОНАМ\\n\\nВыбери федеральный округ или региональный блок:",
+                "reply_markup": json.dumps({"keyboard": region_keyboard(), "resize_keyboard": True, "is_persistent": True}, ensure_ascii=False)
+            })
+        elif text == "🗺 Россия по регионам":
+            tg("sendMessage", {
+                "chat_id": chat,
+                "text": "🗺 РОССИЯ ПО РЕГИОНАМ\n\nВыбери федеральный уровень или региональный блок:",
+                "reply_markup": json.dumps({"keyboard": region_keyboard(), "resize_keyboard": True}, ensure_ascii=False)
+            })
+        elif text == "🇷🇺 Россия":
+            tg("sendMessage", {
+                "chat_id": chat,
+                "text": "🇷🇺 РОССИЯ\n\nВыбери направление:",
+                "reply_markup": json.dumps({"keyboard": russia_keyboard(), "resize_keyboard": True, "is_persistent": True}, ensure_ascii=False)
+            })
+        elif text == "🇷🇺 Россия — федеральные новости":
+            threading.Thread(target=process_news, args=(chat, "russia"), daemon=True).start()
+        elif text == "🇷🇺 Федеральные новости":
+            threading.Thread(target=process_news, args=(chat, "russia"), daemon=True).start()
+        elif text == "↩️ Главное меню":
+            send_menu(chat)
+        elif text == "↩️ История":
+            HISTORY_MODE.pop(chat, None)
+            tg("sendMessage", {
+                "chat_id": chat,
+                "text": "🏛 ИСТОРИЯ\n\nВыбери формат:",
+                "reply_markup": json.dumps({"keyboard": history_keyboard(), "resize_keyboard": True, "is_persistent": True}, ensure_ascii=False)
+            })
+        elif text == "↩️ Регионы":
+            tg("sendMessage", {
+                "chat_id": chat,
+                "text": "🗺 Выбери регион:",
+                "reply_markup": json.dumps({"keyboard": region_keyboard(), "resize_keyboard": True}, ensure_ascii=False)
+            })
+        elif text.startswith("📍 "):
+            region = text[3:].strip()
+            if region in REGION_QUERIES:
+                if HISTORY_MODE.get(chat) == ("region_select", None):
+                    HISTORY_MODE[chat] = ("region", region)
+                    tg("sendMessage", {
+                        "chat_id": chat,
+                        "text": f"🗺 ИСТОРИЯ — {region}\n\nВведи год, например: 1753",
+                        "reply_markup": json.dumps({"keyboard": [[{"text":"↩️ История"}]],"resize_keyboard":True}, ensure_ascii=False)
+                    })
+                else:
+                    tg("sendMessage", {
+                        "chat_id": chat,
+                        "text": f"🗺 {region}\n\nВыбери тип материалов:",
+                        "reply_markup": json.dumps({"keyboard": region_category_keyboard(region), "resize_keyboard": True}, ensure_ascii=False)
+                    })
+        elif text.startswith("📰 Новости — "):
+            region = text[len("📰 Новости — "):]
+            threading.Thread(target=process_news, args=(chat, "news", region), daemon=True).start()
+        elif text.startswith("🚨 Происшествия — "):
+            region = text[len("🚨 Происшествия — "):]
+            threading.Thread(target=process_news, args=(chat, "incidents", region), daemon=True).start()
+        elif text.startswith("⚡ Экстренно — "):
+            region = text[len("⚡ Экстренно — "):]
+            threading.Thread(target=process_news, args=(chat, "emergency", region), daemon=True).start()
+        elif text.startswith("🕵️ Криминал — "):
+            region = text[len("🕵️ Криминал — "):]
+            threading.Thread(target=process_news, args=(chat, "crime", region), daemon=True).start()
+        elif text.startswith("🔎 Розыск — "):
+            region = text[len("🔎 Розыск — "):]
+            threading.Thread(target=process_news, args=(chat, "wanted", region), daemon=True).start()
+        elif text.startswith("🏛 Кремль — "):
+            region = text[len("🏛 Кремль — "):]
+            threading.Thread(target=process_news, args=(chat, "kremlin", region), daemon=True).start()
+        elif text.startswith("📡 События — "):
+            region = text[len("📡 События — "):]
+            threading.Thread(target=process_news, args=(chat, "events", region), daemon=True).start()
+        elif text.startswith("/news") or text == "📰 Новости":
+            threading.Thread(target=process_news, args=(chat, "news"), daemon=True).start()
+        elif text == "🌍 Мир":
+            tg("sendMessage", {
+                "chat_id": chat,
+                "text": "🌍 МИР\n\nВыбери направление:",
+                "reply_markup": json.dumps({"keyboard": world_keyboard(), "resize_keyboard": True, "is_persistent": True}, ensure_ascii=False)
+            })
+        elif text == "🌍 Мировые новости":
+            threading.Thread(target=process_news, args=(chat, "world"), daemon=True).start()
+        elif text == "📡 Мировые события":
+            threading.Thread(target=process_news, args=(chat, "events"), daemon=True).start()
+        elif text == "🚨 Мировые происшествия":
+            threading.Thread(target=process_news, args=(chat, "incidents"), daemon=True).start()
+        elif text == "⚡ Мировые экстренные новости":
+            threading.Thread(target=process_news, args=(chat, "emergency"), daemon=True).start()
+        elif text == "⚔️ Международные конфликты":
+            threading.Thread(target=process_news, args=(chat, "conflicts"), daemon=True).start()
+        elif text == "📡 События":
+            threading.Thread(target=process_news, args=(chat, "events"), daemon=True).start()
+        elif text == "🚨 Происшествия":
+            threading.Thread(target=process_news, args=(chat, "incidents"), daemon=True).start()
+        elif text == "⚡ Экстренно":
+            threading.Thread(target=process_news, args=(chat, "emergency"), daemon=True).start()
+        elif text == "🕵️ Криминал":
+            threading.Thread(target=process_news, args=(chat, "crime"), daemon=True).start()
+        elif text in ("🔎 Розыск", "🔎 Внимание: розыск"):
+            threading.Thread(target=process_news, args=(chat, "wanted"), daemon=True).start()
+        elif text in ("🏛 Кремль", "🏛 Новости Кремля"):
+            threading.Thread(target=process_news, args=(chat, "kremlin"), daemon=True).start()
+        elif text in ("⚔️ СВО", "⚔️ СВО / конфликты"):
+            threading.Thread(target=process_news, args=(chat, "conflicts"), daemon=True).start()
+        elif text == "📡 Анализ Telegram-каналов по СВО":
+            threading.Thread(target=process_news, args=(chat, "conflicts"), daemon=True).start()
+        elif text in ("🔬 Наука и технологии России",):
+            threading.Thread(target=process_news, args=(chat, "russia_tech"), daemon=True).start()
+        elif text == "⚖️ Законы и штрафы":
+            threading.Thread(target=process_news, args=(chat, "laws"), daemon=True).start()
+        elif text == "🤖 ИИ / технологии":
+            threading.Thread(target=process_news, args=(chat, "tech"), daemon=True).start()
+        elif text == "💰 Экономика":
+            threading.Thread(target=process_news, args=(chat, "economy"), daemon=True).start()
+        elif text == "🚗 Авто":
+            threading.Thread(target=process_news, args=(chat, "auto"), daemon=True).start()
+        elif text == "😂 Юмор":
+            threading.Thread(target=process_news, args=(chat, "humor"), daemon=True).start()
+        elif text == "🏛 История":
+            tg("sendMessage", {
+                "chat_id": chat,
+                "text": "🏛 ИСТОРИЯ\n\nВыбери формат:",
+                "reply_markup": json.dumps({"keyboard": history_keyboard(), "resize_keyboard": True, "is_persistent": True}, ensure_ascii=False)
+            })
+        elif text == "📅 Этот день в истории":
+            tg("sendMessage", {
+                "chat_id": chat,
+                "text": "📅 ЭТОТ ДЕНЬ В ИСТОРИИ\n\nВыбери охват:",
+                "reply_markup": json.dumps({"keyboard": history_scope_keyboard(), "resize_keyboard": True}, ensure_ascii=False)
+            })
+        elif text == "🇷🇺 История России":
+            HISTORY_MODE[chat] = ("russia", None)
+            tg("sendMessage", {
+                "chat_id": chat,
+                "text": "🇷🇺 Введи год, например: 1753",
+                "reply_markup": json.dumps({"keyboard": [[{"text":"↩️ История"}]],"resize_keyboard":True}, ensure_ascii=False)
+            })
+        elif text == "🌍 История мира":
+            HISTORY_MODE[chat] = ("world", None)
+            tg("sendMessage", {
+                "chat_id": chat,
+                "text": "🌍 Введи год, например: 1753",
+                "reply_markup": json.dumps({"keyboard": [[{"text":"↩️ История"}]],"resize_keyboard":True}, ensure_ascii=False)
+            })
+        elif text == "🗺 История по регионам":
+            HISTORY_MODE[chat] = ("region_select", None)
+            tg("sendMessage", {
+                "chat_id": chat,
+                "text": "🗺 Выбери регион:",
+                "reply_markup": json.dumps({"keyboard": history_region_keyboard(), "resize_keyboard":True}, ensure_ascii=False)
+            })
+        elif text == "🔥 Тренды":
+            threading.Thread(target=process_news, args=(chat, "trends"), daemon=True).start()
+        elif re.fullmatch(r"\d{4}", text.strip()) and chat in HISTORY_MODE:
+            mode = HISTORY_MODE.pop(chat)
+            year = int(text.strip())
+            if 1 <= year <= 2100:
+                scope = mode[0]
+                region = mode[1] if len(mode) > 1 else None
+                threading.Thread(target=history_day, args=(chat, year, scope, region), daemon=True).start()
+            else:
+                send(chat, "⚠️ Введи корректный год, например: 1753.")
+        elif text.startswith("/status"):
+            send(chat, "🟢 NOWLY AI Editor работает.", menu_keyboard())
+
+    elif "callback_query" in u:
+        q = u["callback_query"]
+        chat = q["message"]["chat"]["id"]
+
+        if ADMIN_ID and str(chat) != str(ADMIN_ID):
+            return
+
+        if q["data"] == "pub":
+            text = q["message"]["text"]
+            result = tg("sendMessage", {
+                "chat_id": CHANNEL,
+                "text": text,
+                "disable_web_page_preview": "false"
+            })
+
+            if result and result.get("ok"):
+                tg("answerCallbackQuery", {
+                    "callback_query_id": q["id"],
+                    "text": "Опубликовано в NOWLY"
+                })
+                try:
+                    tg("editMessageReplyMarkup", {
+                        "chat_id": chat,
+                        "message_id": q["message"]["message_id"],
+                        "reply_markup": json.dumps({"inline_keyboard": []})
+                    })
+                except Exception:
+                    pass
+            else:
+                error_text = "Неизвестная ошибка Telegram"
+                if result:
+                    error_text = result.get("description", str(result))
+                tg("answerCallbackQuery", {
+                    "callback_query_id": q["id"],
+                    "text": "Ошибка публикации",
+                    "show_alert": True
+                })
+                send(
+                    chat,
+                    f"❌ Не удалось опубликовать в канал {CHANNEL}.\n\n"
+                    f"Причина Telegram: {error_text}"
+                )
+
+        else:
+            tg("answerCallbackQuery", {
+                "callback_query_id": q["id"],
+                "text": "Отклонено"
+            })
+            try:
+                tg("editMessageReplyMarkup", {
+                    "chat_id": chat,
+                    "message_id": q["message"]["message_id"],
+                    "reply_markup": json.dumps({"inline_keyboard": []})
+                })
+            except Exception:
+                pass
+
 @app.get("/")
 def health():
     return jsonify({
