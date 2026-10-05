@@ -96,7 +96,7 @@ def process_news(chat):
     if not items:
         send(chat, "⚠️ Не удалось получить новости. Попробуй ещё раз через минуту.")
         return
-    send(chat, "⚡ <b>NOWLY: собираю свежие новости...</b>")
+    send(chat, "⚡ NOWLY: собираю свежие новости...")
     for title, link, summary in items[:5]:
         try:
             post = ai_post(title, link, summary)
@@ -117,7 +117,7 @@ def handle_update(u):
         if ADMIN_ID and str(chat) != str(ADMIN_ID):
             return
         if text.startswith("/start"):
-            send(chat, "⚡ <b>NOWLY AI EDITOR</b>\n\n/news — собрать свежие новости\n/status — проверить работу бота")
+            send(chat, "⚡ NOWLY AI EDITOR\n\n/news — собрать свежие новости\n/status — проверить работу бота")
         elif text.startswith("/news"):
             threading.Thread(target=process_news, args=(chat,), daemon=True).start()
         elif text.startswith("/status"):
