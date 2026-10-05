@@ -837,6 +837,9 @@ def handle_update(u):
         elif text.startswith("🔎 Розыск — "):
             region = text[len("🔎 Розыск — "):]
             threading.Thread(target=process_news, args=(chat, "wanted", region), daemon=True).start()
+        elif text.startswith("🏛 Кремль — "):
+            region = text[len("🏛 Кремль — "):]
+            threading.Thread(target=process_news, args=(chat, "kremlin", region), daemon=True).start()
         elif text.startswith("📡 События — "):
             region = text[len("📡 События — "):]
             threading.Thread(target=process_news, args=(chat, "events", region), daemon=True).start()
@@ -866,9 +869,9 @@ def handle_update(u):
             threading.Thread(target=process_news, args=(chat, "emergency"), daemon=True).start()
         elif text == "🕵️ Криминал":
             threading.Thread(target=process_news, args=(chat, "crime"), daemon=True).start()
-        elif text == "🔎 Розыск":
+        elif text in ("🔎 Розыск", "🔎 Внимание: розыск"):
             threading.Thread(target=process_news, args=(chat, "wanted"), daemon=True).start()
-        elif text == "🏛 Кремль":
+        elif text in ("🏛 Кремль", "🏛 Новости Кремля"):
             threading.Thread(target=process_news, args=(chat, "kremlin"), daemon=True).start()
         elif text == "⚔️ СВО / конфликты":
             threading.Thread(target=process_news, args=(chat, "conflicts"), daemon=True).start()
