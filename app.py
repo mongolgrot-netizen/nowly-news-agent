@@ -81,15 +81,21 @@ def ai_post(title, link, summary=""):
 9. Не пиши пояснений о переводе, не используй Markdown и не добавляй служебный текст.
 10. Если исходной информации мало, лучше сделать короткий точный пост, чем додумывать содержание.'''
     if not GROQ_KEY:
-        return f"📰 <b>{html.escape(title)}</b>\n\nПодробнее: {link}"
+        raise RuntimeError("GROQ_API_KEY не задан в Render Environment Variables")
     r = requests.post(
         "https://api.groq.com/openai/v1/chat/completions",
         headers={"Authorization": f"Bearer {GROQ_KEY}", "Content-Type": "application/json"},
         json={"model": MODEL, "messages": [{"role": "user", "content": prompt}], "temperature": 0.3},
         timeout=45
     )
-    r.raise_for_status()
-    return r.json()["choices"][0]["message"]["content"]
+    if not r.ok:
+        try:
+            detail = r.json().get("error", {}).get("message", r.text)
+        except Exception:
+            detail = r.text
+        raise RuntimeError(f"Groq HTTP {r.status_code}: {detail[:500]}")
+    data = r.json()
+    return data["choices"][0]["message"]["content"]
 
 def process_news(chat):
     items = fetch_news()
@@ -102,7 +108,7 @@ def process_news(chat):
             post = ai_post(title, link, summary)
         except Exception as e:
             print("AI ERROR:", repr(e))
-            post = f"⚠️ <b>Не удалось обработать новость</b>\n\nИсходный материал получен, но AI-перевод временно недоступен. Новость не публикуется, чтобы не отправлять английский текст.\n\nИсточник: {link}"
+            post = f"⚠️ Не удалось обработать новость\n\nAI-перевод временно недоступен. Новость не публикуется.\n\nТехническая причина: {str(e)[:500]}\n\nИсточник: {link}"
         buttons = [[
             {"text": "✅ Опубликовать", "callback_data": "pub"},
             {"text": "❌ Отклонить", "callback_data": "no"}
