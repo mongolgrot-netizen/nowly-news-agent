@@ -320,10 +320,16 @@ def fetch_news(category="news", limit=30, region=None):
 
 def menu_keyboard():
     return [
-        [{"text": "🌍 Мир"}],
-        [{"text": "🇷🇺 Россия"}],
+        [{"text": "🌍 Мировые новости"}],
+        [{"text": "🇷🇺 Россия — федеральные новости"}],
         [{"text": "🗺 Россия по регионам"}],
-        [{"text": "🏛 История"}],
+        [{"text": "📡 События"}, {"text": "🚨 Происшествия"}],
+        [{"text": "⚡ Экстренно"}, {"text": "🕵️ Криминал"}],
+        [{"text": "🔎 Внимание: розыск"}, {"text": "🏛 Новости Кремля"}],
+        [{"text": "⚔️ Международные конфликты"}],
+        [{"text": "🤖 ИИ / технологии"}, {"text": "💰 Экономика"}],
+        [{"text": "🚗 Авто"}, {"text": "🔥 Тренды"}],
+        [{"text": "😂 Юмор"}, {"text": "🏛 История"}],
         [{"text": "ℹ️ Статус"}]
     ]
 
@@ -407,6 +413,8 @@ def world_keyboard():
     return [
         [{"text": "🌍 Мировые новости"}],
         [{"text": "⚔️ Международные конфликты"}],
+        [{"text": "📡 Мировые события"}, {"text": "🚨 Мировые происшествия"}],
+        [{"text": "⚡ Мировые экстренные новости"}],
         [{"text": "🤖 ИИ / технологии"}, {"text": "💰 Экономика"}],
         [{"text": "🚗 Авто"}, {"text": "🔥 Тренды"}],
         [{"text": "😂 Юмор"}, {"text": "🏛 История"}],
@@ -416,9 +424,10 @@ def world_keyboard():
 def russia_keyboard():
     return [
         [{"text": "🇷🇺 Федеральные новости"}],
+        [{"text": "🗺 Новости по регионам"}],
         [{"text": "📡 События"}, {"text": "🚨 Происшествия"}],
         [{"text": "⚡ Экстренно"}, {"text": "🕵️ Криминал"}],
-        [{"text": "🔎 Розыск"}, {"text": "🏛 Кремль"}],
+        [{"text": "🔎 Внимание: розыск"}, {"text": "🏛 Новости Кремля"}],
         [{"text": "⚔️ СВО / конфликты"}],
         [{"text": "🤖 ИИ / технологии"}, {"text": "💰 Экономика"}],
         [{"text": "🚗 Авто"}, {"text": "🔥 Тренды"}],
@@ -438,10 +447,10 @@ def region_keyboard():
 
 def region_category_keyboard(region):
     return [
-        [{"text": f"📰 Новости — {region}"}, {"text": f"🚨 Происшествия — {region}"}],
-        [{"text": f"⚡ Экстренно — {region}"}, {"text": f"🕵️ Криминал — {region}"}],
-        [{"text": f"🔎 Розыск — {region}"}, {"text": f"📡 События — {region}"}],
-        [{"text": f"↩️ Регионы"}]
+        [{"text": f"📰 Новости — {region}"}, {"text": f"📡 События — {region}"}],
+        [{"text": f"🚨 Происшествия — {region}"}, {"text": f"⚡ Экстренно — {region}"}],
+        [{"text": f"🕵️ Криминал — {region}"}, {"text": f"🔎 Розыск — {region}"}],
+        [{"text": f"🏛 Кремль — {region}"}, {"text": f"↩️ Регионы"}]
     ]
 
 def send_menu(chat):
@@ -760,6 +769,12 @@ def handle_update(u):
 
         if text.startswith("/start") or text == "ℹ️ Статус":
             send_menu(chat)
+        elif text == "🗺 Новости по регионам":
+            tg("sendMessage", {
+                "chat_id": chat,
+                "text": "🗺 РОССИЯ ПО РЕГИОНАМ\\n\\nВыбери федеральный округ или региональный блок:",
+                "reply_markup": json.dumps({"keyboard": region_keyboard(), "resize_keyboard": True, "is_persistent": True}, ensure_ascii=False)
+            })
         elif text == "🗺 Россия по регионам":
             tg("sendMessage", {
                 "chat_id": chat,
@@ -772,6 +787,8 @@ def handle_update(u):
                 "text": "🇷🇺 РОССИЯ\n\nВыбери направление:",
                 "reply_markup": json.dumps({"keyboard": russia_keyboard(), "resize_keyboard": True, "is_persistent": True}, ensure_ascii=False)
             })
+        elif text == "🇷🇺 Россия — федеральные новости":
+            threading.Thread(target=process_news, args=(chat, "russia"), daemon=True).start()
         elif text == "🇷🇺 Федеральные новости":
             threading.Thread(target=process_news, args=(chat, "russia"), daemon=True).start()
         elif text == "↩️ Главное меню":
@@ -833,6 +850,12 @@ def handle_update(u):
             })
         elif text == "🌍 Мировые новости":
             threading.Thread(target=process_news, args=(chat, "world"), daemon=True).start()
+        elif text == "📡 Мировые события":
+            threading.Thread(target=process_news, args=(chat, "events"), daemon=True).start()
+        elif text == "🚨 Мировые происшествия":
+            threading.Thread(target=process_news, args=(chat, "incidents"), daemon=True).start()
+        elif text == "⚡ Мировые экстренные новости":
+            threading.Thread(target=process_news, args=(chat, "emergency"), daemon=True).start()
         elif text == "⚔️ Международные конфликты":
             threading.Thread(target=process_news, args=(chat, "conflicts"), daemon=True).start()
         elif text == "📡 События":
