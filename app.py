@@ -382,9 +382,10 @@ def groq(prompt, temperature=0.2, max_tokens=500):
     raise RuntimeError("Groq: превышен лимит запросов")
 def select_news(items, category="news", region=None):
     candidates = []
-    for i, (title, link, summary) in enumerate(items):
+    for i, item in enumerate(items):
+        title, link, summary, region_tag = item
         candidates.append(
-            f"[{i}] {title}\nОписание: {summary[:350]}\nИсточник: {link}"
+            f"[{i}] {title}\nРегион: {region_tag}\nОписание: {summary[:350]}\nИсточник: {link}"
         )
 
     category_name = CATEGORIES.get(category, "📰 Новости")
