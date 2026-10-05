@@ -891,7 +891,7 @@ def handle_update(u):
             })
         elif text == "🔥 Тренды":
             threading.Thread(target=process_news, args=(chat, "trends"), daemon=True).start()
-                elif re.fullmatch(r"\d{4}", text.strip()) and chat in HISTORY_MODE:
+        elif re.fullmatch(r"\d{4}", text.strip()) and chat in HISTORY_MODE:
             mode = HISTORY_MODE.pop(chat)
             year = int(text.strip())
             if 1 <= year <= 2100:
