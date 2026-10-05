@@ -372,6 +372,47 @@ def history_region_keyboard():
         [{"text": "↩️ История"}]
     ]
 
+def ruwiki_search_event(title):
+    """Find a relevant Ruwiki article for a historical event. Free MediaWiki API."""
+    if not title:
+        return None
+    try:
+        q = re.sub(r"[^\\w\\sА-Яа-яЁё-]", " ", title)
+        q = re.sub(r"\\s+", " ", q).strip()[:220]
+        url = "https://ru.ruwiki.ru/w/api.php"
+        params = {
+            "action":"query","list":"search","srsearch":q,
+            "srnamespace":0,"srlimit":2,"format":"json","utf8":1
+        }
+        r = requests.get(url, params=params, timeout=15,
+                         headers={"User-Agent":"NOWLY-News-Agent/1.0"})
+        if not r.ok:
+            return None
+        hits = r.json().get("query",{}).get("search",[])
+        if not hits:
+            return None
+        page = hits[0]
+        pageid = page.get("pageid")
+        params2 = {
+            "action":"query","pageids":pageid,"prop":"extracts|info",
+            "explaintext":1,"inprop":"url","exchars":5000,
+            "format":"json","utf8":1
+        }
+        r2 = requests.get(url, params=params2, timeout=15,
+                          headers={"User-Agent":"NOWLY-News-Agent/1.0"})
+        if not r2.ok:
+            return {"title":page.get("title",""),"url":"https://ru.ruwiki.ru/wiki/"+requests.utils.quote(page.get("title","").replace(" ","_")),"extract":""}
+        pages=r2.json().get("query",{}).get("pages",{})
+        obj=next(iter(pages.values()),{})
+        return {
+            "title":obj.get("title") or page.get("title",""),
+            "url":obj.get("fullurl") or ("https://ru.ruwiki.ru/wiki/"+requests.utils.quote((obj.get("title") or page.get("title","")).replace(" ","_"))),
+            "extract":(obj.get("extract") or "")[:5000]
+        }
+    except Exception as e:
+        print("RUWIKI HISTORY ERROR:",repr(e))
+        return None
+
 def history_day(chat, scope="world", region=None):
     from datetime import datetime
     now=datetime.now()
@@ -393,57 +434,76 @@ def history_day(chat, scope="world", region=None):
             print("HISTORY API:",repr(ex))
 
     if scope=="russia":
-        scope_text="Россия: Российская империя, СССР и современная Россия."
+        scope_text="только Россия: Российская империя, РСФСР, СССР и современная Российская Федерация. Международные события допустимы только если Россия/СССР является непосредственным участником."
     elif scope=="region":
-        scope_text=f"только {region}"
+        scope_text=f"только события, непосредственно связанные с регионом {region}. Не включай общероссийские или мировые события без прямой связи с регионом."
     else:
-        scope_text="весь мир"
+        scope_text="весь мир; выбирай события с заметным историческим значением."
 
     data=[]
-    for ev in events[:50]:
+    for ev in events[:35]:
         text_ev=(ev.get("text") or "").strip()
         year=ev.get("year")
         pages=ev.get("pages") or []
         if text_ev:
-            data.append({"year":year,"text":text_ev[:900],"pages":pages[:1]})
+            data.append({"year":year,"text":text_ev[:1200],"pages":pages[:1]})
 
     if not data:
         send(chat,f"📅 ЭТОТ ДЕНЬ В ИСТОРИИ — {date_label}\n\nНе удалось получить исторические события за сегодняшнюю дату.")
         return
 
-    prompt=f"""Ты исторический редактор NOWLY.
-Сегодня {date_label}. Подготовь рубрику «Этот день в истории» для охвата: {scope_text}.
+    # Ruwiki is used as a second Russian-language source for the most relevant candidates.
+    enriched=[]
+    for ev in data[:18]:
+        query_title=ev["text"]
+        if ev.get("pages"):
+            query_title=ev["pages"][0].get("normalizedtitle") or ev["pages"][0].get("title") or query_title
+        rw=ruwiki_search_event(query_title)
+        ev["ruwiki"]=rw
+        enriched.append(ev)
 
-ВАЖНО: год НЕ задается пользователем. Выбирай значимые события, произошедшие именно в этот календарный день в РАЗНЫЕ годы.
-Выбери 5–8 самых интересных событий из разных эпох. Приоритет: войны и переломные события, государственные решения, революции, открытия, наука, технологии, катастрофы, культура и другие события с заметным историческим значением.
-Не включай обычные дни рождения и смерти, если они не являются самостоятельным значимым событием.
-Для России и региона отбрасывай события, не относящиеся к выбранному охвату.
-Не выдумывай годы или факты.
+    prompt=f"""Ты старший исторический редактор Telegram-канала NOWLY.
+Сегодня {date_label}. Подготовь подробный материал «Этот день в истории».
+Охват: {scope_text}
+
+КРИТИЧЕСКИЕ ПРАВИЛА:
+1. Используй только события, которые произошли именно {date_label} в разные годы.
+2. Не требуй от пользователя вводить год.
+3. Для России и регионов соблюдай строгую географическую принадлежность. Не включай Кыргызстан, Югославию, Великобританию и другие страны только потому, что событие интересное.
+4. Выбери 6–10 действительно значимых событий из разных эпох. Если для выбранного охвата подтвержденных событий меньше — лучше показать меньше, чем заполнить список нерелевантными фактами.
+5. Для каждого события дай: год, что произошло, контекст/причину если она подтверждена, ключевых участников и последствия/значение.
+6. Не выдумывай подробности. Если источник дает только факт, не добавляй неподтвержденные причины.
+7. Не включай обычные дни рождения/смерти как события.
+8. Рувики — дополнительный источник для подробностей, Wikimedia/Wikipedia — источник календарного события. Если источники расходятся, не скрывай расхождение.
+9. Не копируй большие фрагменты источников дословно. Пересказывай своими словами.
+10. Материал должен быть пригоден для ручной проверки перед публикацией.
 
 Формат:
 📅 ЭТОТ ДЕНЬ В ИСТОРИИ — {date_label}
 
-ГОД — событие
-ГОД — событие
-...
+🔹 ГОД — название события
+Подробно: 2–4 предложения о том, что произошло и почему это важно.
 
-Источник: Wikimedia / Wikipedia.
+[следующие события]
 
-Без Markdown, HTML и служебных пояснений.
+📚 Источники:
+Рувики: ссылки использованных статей
+Wikimedia / Wikipedia: ссылки календарных материалов
 
-Данные Wikimedia:
-{json.dumps(data,ensure_ascii=False)}
+Без Markdown-разметки, кроме простых эмодзи и переносов строк. Не добавляй служебные комментарии.
+
+Данные календаря и дополнительные материалы:
+{json.dumps(enriched,ensure_ascii=False)[:42000]}
 """
     try:
-        post=groq(prompt,0.2,800).strip()
+        post=groq(prompt,0.2,1400).strip()
         if not post: raise ValueError("empty")
     except Exception as ex:
         print("HISTORY AI:",repr(ex))
-        post=f"📅 ЭТОТ ДЕНЬ В ИСТОРИИ — {date_label}\n\n" + "\n".join(
-            f"{x['year']} — {x['text']}" for x in data[:8]
-        ) + "\n\nИсточник: Wikimedia / Wikipedia."
+        post=f"📅 ЭТОТ ДЕНЬ В ИСТОРИИ — {date_label}\n\n"
+        post+="\n\n".join(f"🔹 {x['year']} — {x['text']}" for x in data[:8])
+        post+="\n\n📚 Источник: Wikimedia / Wikipedia."
     send(chat,post,[[{"text":"✅ Опубликовать","callback_data":"pub"},{"text":"❌ Отклонить","callback_data":"no"}]])
-
 
 def world_keyboard():
     return [
