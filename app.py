@@ -778,314 +778,96 @@ def process_news(chat, category="news", region=None):
         send(chat, "⚠️ Не удалось получить свежие новости. Попробуй ещё раз через минуту.")
         return
 
+    # Free Groq has a strict TPM limit. Do not run several AI calls per button.
+    # Pick the freshest candidate deterministically, then use one compact AI call
+    # to edit it and assess whether it is safe enough for manual publication.
+    selected = items[:1]
+    send(chat, f"🧠 NOWLY: отобран материал: 1 из {len(items)}" + (f"\n🗺 Регион: {region}" if region else ""))
+
+    title, link, summary, region_tag = selected[0]
     try:
-        selected = select_news(items, category, region)
+        related = related_items((title, link, summary, region_tag), items, max_items=3)
+        searched = search_related_news((title, link, summary, region_tag), max_items=3)
+        telegram_sources = search_telegram_news((title, link, summary, region_tag), max_items=3)
+
+        pool = related + searched + telegram_sources
+        seen = set()
+        merged = []
+        for item in pool:
+            key = item[1] or item[0].lower()
+            if key != link and key not in seen:
+                seen.add(key)
+                merged.append(item)
+        related = merged[:4]
+
+        source_lines = [(title, link)] + [(x[0], x[1]) for x in related[:4]]
+        material = "\n\n".join(
+            f"[{i}] {x[0]}\nИсточник: {x[1]}\nОписание: {x[2][:500]}"
+            for i, x in enumerate([selected[0]] + related[:4])
+        )
+
+        prompt = f"""Ты редактор новостного Telegram-канала NOWLY.
+Рубрика: {category_name}
+Материалы собраны из открытых RSS-источников.
+
+Проверь, относится ли это к одному событию. Если есть подтверждение в нескольких независимых источниках, отметь подтвержденные факты. Telegram-публикации считай сигналом/первоисточником, но не доказательством сами по себе.
+
+Верни строго JSON:
+{{"status":"confirmed|partial_confirmed|attributed|conflict|single_source",
+"recommendation":"publish|hold",
+"reason":"кратко",
+"telegram_first":true,
+"telegram_primary":false,
+"post":"готовый короткий пост на русском языке"}}
+
+Правила:
+- Не придумывай.
+- Если независимого подтверждения нет — recommendation=hold.
+- Не называй заявление фактом.
+- Если источники расходятся — recommendation=hold.
+- Пост 2-3 коротких абзаца, нейтральный заголовок с одним эмодзи.
+- В конце: Источник: URL основного материала.
+- Без Markdown, HTML и служебных пояснений.
+- Для СВО не публикуй оперативно чувствительные данные, координаты или тактические сведения.
+
+Материалы:
+{material}
+"""
+        raw = groq(prompt, 0.1, 650)
+        match = re.search(r"\{.*\}", raw, re.S)
+        data = json.loads(match.group(0)) if match else {}
+        status = data.get("status", "single_source")
+        recommendation = data.get("recommendation", "hold")
+        labels = {
+            "confirmed":"🟢 подтверждено",
+            "partial_confirmed":"🟠 частично подтверждено",
+            "attributed":"🟡 заявление / атрибуция",
+            "conflict":"🔴 источники расходятся",
+            "single_source":"⚪ один источник"
+        }
+        tg_first = "да" if data.get("telegram_first") else "нет"
+        tg_primary = "да" if data.get("telegram_primary") else "нет"
+        rec = "🟢 рекомендовано к публикации" if recommendation == "publish" else "🔴 лучше НЕ публиковать"
+        send(chat, f"🔎 Проверка: {labels.get(status, '⚪ не определено')}\n{rec}\nTelegram первым: {tg_first} • Telegram — основной источник: {tg_primary}\n{str(data.get('reason',''))[:700]}")
+        post = str(data.get("post","")).strip()
+        if not post:
+            post = f"📰 {title}\n\n{summary[:900]}\n\nИсточник: {link}\n\n⚠️ Черновик требует ручной проверки."
+        if recommendation == "hold":
+            post += "\n\n⚠️ Редактор: публикация рекомендуется только после дополнительной проверки."
     except Exception as e:
-        print("SELECT ERROR:", repr(e))
-        selected = items[:3]
+        print("AI ERROR:", repr(e))
+        post = (
+            f"⚠️ AI-редактор временно недоступен.\n\n"
+            f"Черновик: {title}\n\n{summary[:900]}\n\n"
+            f"Источник: {link}\n\n"
+            "Новость НЕ считается проверенной."
+        )
 
-    send(chat, f"🧠 NOWLY: отобрано материалов: {len(selected)} из {len(items)}" + (f"\n🗺 Регион: {region}" if region else ""))
-
-    for item in selected:
-        title, link, summary, region = item
-        try:
-            related = related_items((title, link, summary, region), items)
-            searched = search_related_news((title, link, summary, region))
-            telegram_sources = search_telegram_news((title, link, summary, region))
-            # Merge and deduplicate by URL/title.
-            pool = related + searched
-            seen = set()
-            merged = []
-            for item in pool:
-                key = item[1] or item[0].lower()
-                if key not in seen and item[1] != link:
-                    seen.add(key)
-                    merged.append(item)
-            related = merged[:8]
-
-            fact = fact_check((title, link, summary, region), related, telegram_sources)
-            labels = {
-                "confirmed": "🟢 подтверждено",
-                "partial_confirmed": "🟠 частично подтверждено",
-                "attributed": "🟡 заявление / атрибуция",
-                "conflict": "🔴 источники расходятся",
-                "single_source": "⚪ один источник"
-            }
-            tg_first = "да" if fact.get("telegram_first") else "нет"
-            tg_primary = "да" if fact.get("telegram_primary") else "нет"
-            recommendation = fact.get("recommendation", "hold")
-            rec_label = "🟢 рекомендовано к публикации" if recommendation == "publish" else "🔴 лучше НЕ публиковать"
-            send(chat, f"🔎 Проверка: {labels.get(fact.get('status'), '⚪ не определено')}\n"
-                       f"{rec_label}\n"
-                       f"Telegram первым: {tg_first} • Telegram — основной источник: {tg_primary}\n"
-                       f"{fact.get('reason','')[:700]}")
-
-            source_list = [(title, link)] + [(x[0], x[1]) for x in related[:5]] + [(x[0], x[1]) for x in telegram_sources[:3]]
-            try:
-                post = ai_post(
-                    title, link, summary + f"\nРегион: {region}", category, fact,
-                    source_list
-                )
-            except Exception as ai_error:
-                print("AI POST FALLBACK:", repr(ai_error))
-                post = (
-                    f"📰 {title}\n\n"
-                    f"{summary[:900]}\n\n"
-                    f"Источник: {link}\n\n"
-                    "⚠️ AI-редактор временно недоступен. Черновик не считается проверенным; "
-                    "перед публикацией проверь источник вручную."
-                )
-            if fact.get("recommendation") == "hold":
-                post += "\n\n⚠️ Редактор: публикация рекомендуется только после дополнительной проверки."
-        except Exception as e:
-            print("AI ERROR:", repr(e))
-            post = (
-                "⚠️ Не удалось обработать новость\n\n"
-                "AI-редактор временно недоступен. Новость не публикуется.\n\n"
-                f"Техническая причина: {str(e)[:500]}\n\n"
-                f"Источник: {link}"
-            )
-
-        buttons = [[
-            {"text": "✅ Опубликовать", "callback_data": "pub"},
-            {"text": "❌ Отклонить", "callback_data": "no"}
-        ]]
-        send(chat, post, buttons)
-
-def handle_update(u):
-    if "message" in u:
-        m = u["message"]
-        chat = m["chat"]["id"]
-        text = m.get("text", "")
-
-        if ADMIN_ID and str(chat) != str(ADMIN_ID):
-            return
-
-        if text.startswith("/start") or text == "ℹ️ Статус":
-            send_menu(chat)
-        elif text == "🗺 Новости по регионам":
-            tg("sendMessage", {
-                "chat_id": chat,
-                "text": "🗺 РОССИЯ ПО РЕГИОНАМ\\n\\nВыбери федеральный округ или региональный блок:",
-                "reply_markup": json.dumps({"keyboard": region_keyboard(), "resize_keyboard": True, "is_persistent": True}, ensure_ascii=False)
-            })
-        elif text == "🗺 Россия по регионам":
-            tg("sendMessage", {
-                "chat_id": chat,
-                "text": "🗺 РОССИЯ ПО РЕГИОНАМ\n\nВыбери федеральный уровень или региональный блок:",
-                "reply_markup": json.dumps({"keyboard": region_keyboard(), "resize_keyboard": True}, ensure_ascii=False)
-            })
-        elif text == "🇷🇺 Россия":
-            tg("sendMessage", {
-                "chat_id": chat,
-                "text": "🇷🇺 РОССИЯ\n\nВыбери направление:",
-                "reply_markup": json.dumps({"keyboard": russia_keyboard(), "resize_keyboard": True, "is_persistent": True}, ensure_ascii=False)
-            })
-        elif text == "🇷🇺 Россия — федеральные новости":
-            threading.Thread(target=process_news, args=(chat, "russia"), daemon=True).start()
-        elif text == "🇷🇺 Федеральные новости":
-            threading.Thread(target=process_news, args=(chat, "russia"), daemon=True).start()
-        elif text == "↩️ Главное меню":
-            send_menu(chat)
-        elif text == "↩️ История":
-            HISTORY_MODE.pop(chat, None)
-            tg("sendMessage", {
-                "chat_id": chat,
-                "text": "🏛 ИСТОРИЯ\n\nВыбери формат:",
-                "reply_markup": json.dumps({"keyboard": history_keyboard(), "resize_keyboard": True, "is_persistent": True}, ensure_ascii=False)
-            })
-        elif text == "↩️ Регионы":
-            tg("sendMessage", {
-                "chat_id": chat,
-                "text": "🗺 Выбери регион:",
-                "reply_markup": json.dumps({"keyboard": region_keyboard(), "resize_keyboard": True}, ensure_ascii=False)
-            })
-        elif text.startswith("📍 "):
-            region = text[3:].strip()
-            if region in REGION_QUERIES:
-                if HISTORY_MODE.get(chat) == ("region_select", None):
-                    HISTORY_MODE[chat] = ("region", region)
-                    tg("sendMessage", {
-                        "chat_id": chat,
-                        "text": f"🗺 ИСТОРИЯ — {region}\n\nВведи год, например: 1753",
-                        "reply_markup": json.dumps({"keyboard": [[{"text":"↩️ История"}]],"resize_keyboard":True}, ensure_ascii=False)
-                    })
-                else:
-                    tg("sendMessage", {
-                        "chat_id": chat,
-                        "text": f"🗺 {region}\n\nВыбери тип материалов:",
-                        "reply_markup": json.dumps({"keyboard": region_category_keyboard(region), "resize_keyboard": True}, ensure_ascii=False)
-                    })
-        elif text.startswith("📰 Новости — "):
-            region = text[len("📰 Новости — "):]
-            threading.Thread(target=process_news, args=(chat, "news", region), daemon=True).start()
-        elif text.startswith("🚨 Происшествия — "):
-            region = text[len("🚨 Происшествия — "):]
-            threading.Thread(target=process_news, args=(chat, "incidents", region), daemon=True).start()
-        elif text.startswith("⚡ Экстренно — "):
-            region = text[len("⚡ Экстренно — "):]
-            threading.Thread(target=process_news, args=(chat, "emergency", region), daemon=True).start()
-        elif text.startswith("🕵️ Криминал — "):
-            region = text[len("🕵️ Криминал — "):]
-            threading.Thread(target=process_news, args=(chat, "crime", region), daemon=True).start()
-        elif text.startswith("🔎 Розыск — "):
-            region = text[len("🔎 Розыск — "):]
-            threading.Thread(target=process_news, args=(chat, "wanted", region), daemon=True).start()
-        elif text.startswith("🏛 Кремль — "):
-            region = text[len("🏛 Кремль — "):]
-            threading.Thread(target=process_news, args=(chat, "kremlin", region), daemon=True).start()
-        elif text.startswith("📡 События — "):
-            region = text[len("📡 События — "):]
-            threading.Thread(target=process_news, args=(chat, "events", region), daemon=True).start()
-        elif text.startswith("/news") or text == "📰 Новости":
-            threading.Thread(target=process_news, args=(chat, "news"), daemon=True).start()
-        elif text == "🌍 Мир":
-            tg("sendMessage", {
-                "chat_id": chat,
-                "text": "🌍 МИР\n\nВыбери направление:",
-                "reply_markup": json.dumps({"keyboard": world_keyboard(), "resize_keyboard": True, "is_persistent": True}, ensure_ascii=False)
-            })
-        elif text == "🌍 Мировые новости":
-            threading.Thread(target=process_news, args=(chat, "world"), daemon=True).start()
-        elif text == "📡 Мировые события":
-            threading.Thread(target=process_news, args=(chat, "events"), daemon=True).start()
-        elif text == "🚨 Мировые происшествия":
-            threading.Thread(target=process_news, args=(chat, "incidents"), daemon=True).start()
-        elif text == "⚡ Мировые экстренные новости":
-            threading.Thread(target=process_news, args=(chat, "emergency"), daemon=True).start()
-        elif text == "⚔️ Международные конфликты":
-            threading.Thread(target=process_news, args=(chat, "conflicts"), daemon=True).start()
-        elif text == "📡 События":
-            threading.Thread(target=process_news, args=(chat, "events"), daemon=True).start()
-        elif text == "🚨 Происшествия":
-            threading.Thread(target=process_news, args=(chat, "incidents"), daemon=True).start()
-        elif text == "⚡ Экстренно":
-            threading.Thread(target=process_news, args=(chat, "emergency"), daemon=True).start()
-        elif text == "🕵️ Криминал":
-            threading.Thread(target=process_news, args=(chat, "crime"), daemon=True).start()
-        elif text in ("🔎 Розыск", "🔎 Внимание: розыск"):
-            threading.Thread(target=process_news, args=(chat, "wanted"), daemon=True).start()
-        elif text in ("🏛 Кремль", "🏛 Новости Кремля"):
-            threading.Thread(target=process_news, args=(chat, "kremlin"), daemon=True).start()
-        elif text in ("⚔️ СВО", "⚔️ СВО / конфликты"):
-            threading.Thread(target=process_news, args=(chat, "conflicts"), daemon=True).start()
-        elif text == "📡 Анализ Telegram-каналов по СВО":
-            threading.Thread(target=process_news, args=(chat, "conflicts"), daemon=True).start()
-        elif text in ("🔬 Наука и технологии России",):
-            threading.Thread(target=process_news, args=(chat, "russia_tech"), daemon=True).start()
-        elif text == "⚖️ Законы и штрафы":
-            threading.Thread(target=process_news, args=(chat, "laws"), daemon=True).start()
-        elif text == "🤖 ИИ / технологии":
-            threading.Thread(target=process_news, args=(chat, "tech"), daemon=True).start()
-        elif text == "💰 Экономика":
-            threading.Thread(target=process_news, args=(chat, "economy"), daemon=True).start()
-        elif text == "🚗 Авто":
-            threading.Thread(target=process_news, args=(chat, "auto"), daemon=True).start()
-        elif text == "😂 Юмор":
-            threading.Thread(target=process_news, args=(chat, "humor"), daemon=True).start()
-        elif text == "🏛 История":
-            tg("sendMessage", {
-                "chat_id": chat,
-                "text": "🏛 ИСТОРИЯ\n\nВыбери формат:",
-                "reply_markup": json.dumps({"keyboard": history_keyboard(), "resize_keyboard": True, "is_persistent": True}, ensure_ascii=False)
-            })
-        elif text == "📅 Этот день в истории":
-            tg("sendMessage", {
-                "chat_id": chat,
-                "text": "📅 ЭТОТ ДЕНЬ В ИСТОРИИ\n\nВыбери охват:",
-                "reply_markup": json.dumps({"keyboard": history_scope_keyboard(), "resize_keyboard": True}, ensure_ascii=False)
-            })
-        elif text == "🇷🇺 История России":
-            HISTORY_MODE[chat] = ("russia", None)
-            tg("sendMessage", {
-                "chat_id": chat,
-                "text": "🇷🇺 Введи год, например: 1753",
-                "reply_markup": json.dumps({"keyboard": [[{"text":"↩️ История"}]],"resize_keyboard":True}, ensure_ascii=False)
-            })
-        elif text == "🌍 История мира":
-            HISTORY_MODE[chat] = ("world", None)
-            tg("sendMessage", {
-                "chat_id": chat,
-                "text": "🌍 Введи год, например: 1753",
-                "reply_markup": json.dumps({"keyboard": [[{"text":"↩️ История"}]],"resize_keyboard":True}, ensure_ascii=False)
-            })
-        elif text == "🗺 История по регионам":
-            HISTORY_MODE[chat] = ("region_select", None)
-            tg("sendMessage", {
-                "chat_id": chat,
-                "text": "🗺 Выбери регион:",
-                "reply_markup": json.dumps({"keyboard": history_region_keyboard(), "resize_keyboard":True}, ensure_ascii=False)
-            })
-        elif text == "🔥 Тренды":
-            threading.Thread(target=process_news, args=(chat, "trends"), daemon=True).start()
-        elif re.fullmatch(r"\d{4}", text.strip()) and chat in HISTORY_MODE:
-            mode = HISTORY_MODE.pop(chat)
-            year = int(text.strip())
-            if 1 <= year <= 2100:
-                scope = mode[0]
-                region = mode[1] if len(mode) > 1 else None
-                threading.Thread(target=history_day, args=(chat, year, scope, region), daemon=True).start()
-            else:
-                send(chat, "⚠️ Введи корректный год, например: 1753.")
-        elif text.startswith("/status"):
-            send(chat, "🟢 NOWLY AI Editor работает.", menu_keyboard())
-
-    elif "callback_query" in u:
-        q = u["callback_query"]
-        chat = q["message"]["chat"]["id"]
-
-        if ADMIN_ID and str(chat) != str(ADMIN_ID):
-            return
-
-        if q["data"] == "pub":
-            text = q["message"]["text"]
-            result = tg("sendMessage", {
-                "chat_id": CHANNEL,
-                "text": text,
-                "disable_web_page_preview": "false"
-            })
-
-            if result and result.get("ok"):
-                tg("answerCallbackQuery", {
-                    "callback_query_id": q["id"],
-                    "text": "Опубликовано в NOWLY"
-                })
-                try:
-                    tg("editMessageReplyMarkup", {
-                        "chat_id": chat,
-                        "message_id": q["message"]["message_id"],
-                        "reply_markup": json.dumps({"inline_keyboard": []})
-                    })
-                except Exception:
-                    pass
-            else:
-                error_text = "Неизвестная ошибка Telegram"
-                if result:
-                    error_text = result.get("description", str(result))
-                tg("answerCallbackQuery", {
-                    "callback_query_id": q["id"],
-                    "text": "Ошибка публикации",
-                    "show_alert": True
-                })
-                send(
-                    chat,
-                    f"❌ Не удалось опубликовать в канал {CHANNEL}.\n\n"
-                    f"Причина Telegram: {error_text}"
-                )
-
-        else:
-            tg("answerCallbackQuery", {
-                "callback_query_id": q["id"],
-                "text": "Отклонено"
-            })
-            try:
-                tg("editMessageReplyMarkup", {
-                    "chat_id": chat,
-                    "message_id": q["message"]["message_id"],
-                    "reply_markup": json.dumps({"inline_keyboard": []})
-                })
-            except Exception:
-                pass
+    buttons = [[
+        {"text":"✅ Опубликовать","callback_data":"pub"},
+        {"text":"❌ Отклонить","callback_data":"no"}
+    ]]
+    send(chat, post, buttons)
 
 @app.get("/")
 def health():
