@@ -435,15 +435,17 @@ def _history_source_lines(ev):
     seen = set()
 
     def plain_url(value):
-        url = str(value or "").strip()
-        # Upstream Wikimedia data can contain a Markdown wrapper. Extract only the URL.
+        url = str(value or "").strip().replace("\\", "")
+        # Accept both a plain URL and an upstream Markdown link.
         m = re.search(r"https?://[^\\s\\]]+", url)
         if not m:
             return ""
         url = m.group(0)
-        url = url.replace("\\", "")
-        # Remove a closing parenthesis belonging to a Markdown wrapper.
-        while url.endswith(")"):
+        # If Markdown was supplied, take only the URL inside the first pair of brackets.
+        if "](" in url:
+            url = url.split("](", 1)[0].lstrip("[")
+        # Remove only wrapper parentheses at the end; preserve URL path parentheses.
+        while url.endswith(")") and url.count("(") < url.count(")"):
             url = url[:-1]
         return url
 
