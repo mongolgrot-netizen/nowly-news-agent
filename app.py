@@ -769,6 +769,7 @@ def history_detail(chat, number):
     if not cache:
         send(chat, "⚠️ Материал истории больше не доступен. Запусти «Этот день в истории» заново.")
         return
+
     try:
         item = cache["events"][int(number) - 1]
     except (ValueError, IndexError, TypeError):
@@ -777,7 +778,14 @@ def history_detail(chat, number):
 
     ev = item["source"]
     page_title = ((ev.get("pages") or [{}])[0].get("title") or "").strip()
-    wiki_extract = _history_wiki_extract(page_title) if page_title and not re.fullmatch(r"\d{4}\s*год(?:а)?", page_title, re.I) else ""
+
+    # Берём только проверяемый исходный материал. Никакого AI-пересказа:
+    # это исключает выдуманные детали и редакторские домыслы.
+    wiki_extract = (
+        _history_wiki_extract(page_title)
+        if page_title and not re.fullmatch(r"\d{4}\s*год(?:а)?", page_title, re.I)
+        else ""
+    )
     rw_extract = ((ev.get("ruwiki") or {}).get("extract") or "").strip()
 
     def clean_source(text):
@@ -785,38 +793,104 @@ def history_detail(chat, number):
             return ""
         text = re.sub(r"(?m)^\s*={2,6}\s*(.*?)\s*={2,6}\s*$", r"\1", text)
         text = re.sub(r"\[\d+\]", "", text)
-        text = re.split(r"(?im)\bПредыстория\b|\bСм\. также\b|\bПримечания\b|\bЛитература\b|\bСсылки\b", text, maxsplit=1)[0]
-        return re.sub(r"\s+", " ", text).strip()
+        text = re.sub(r"\{\{[^{}]+\}\}", "", text)
+        text = re.sub(r"\s+", " ", text)
+        return text.strip()
 
-    base = clean_source(wiki_extract) or clean_source(rw_extract) or ev.get("text", "").strip()
-    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", base) if len(s.strip()) > 25]
+    def split_sentences(text):
+        return [
+            s.strip()
+            for s in re.split(r"(?<=[.!?])\s+", text)
+            if len(s.strip()) >= 35
+        ]
 
-    bad = ("по оценкам нескольких источников", "повлиял лично на президента",
-           "непосредственно вовлечён", "северный поток", "70-летия")
+    # Сначала используем Wikipedia, затем Рувики, затем исходную запись
+    # календаря. Так материал остаётся привязанным к конкретному событию.
+    base = clean_source(wiki_extract) or clean_source(rw_extract) or clean_source(ev.get("text", ""))
+    sentences = split_sentences(base)
+
+    # Убираем типичные фрагменты, которые не нужны в короткой редакционной
+    # заметке NOWLY и могут уводить материал в сторону от самого события.
+    bad = (
+        "по оценкам нескольких источников",
+        "повлиял лично на президента",
+        "непосредственно вовлечён",
+        "северный поток",
+        "70-летия",
+    )
     safe = [s for s in sentences if not any(x in s.casefold() for x in bad)]
 
-    what = safe[:6] or sentences[:4]
-    core = " ".join(what)
-    if len(core) > 2400:
-        core = core[:2400].rsplit(" ", 1)[0] + "…"
+    # Не даём статье разрастись: Telegram должен получить насыщенный,
+    # но читаемый материал.
+    if not safe:
+        safe = sentences
 
-    detail = f"📖 {item['year']} — {item['title']}\n\nЧто произошло:\n{core}\n"
+    # Убираем повторяющиеся предложения.
+    unique = []
+    seen = set()
+    for s in safe:
+        key = re.sub(r"\W+", " ", s.casefold()).strip()
+        if key and key not in seen:
+            seen.add(key)
+            unique.append(s)
+    safe = unique
 
-    if len(safe) > 6:
-        later = safe[6:8]
-        if later:
-            detail += "\nЧто было дальше:\n" + " ".join(later) + "\n"
+    # Первые 3–4 предложения обычно содержат основную канву события.
+    # Следующие предложения используем как последствия/дальнейшее развитие.
+    main = safe[:4]
+    later = safe[4:8]
 
-    send(chat, detail.strip())
+    def trim_block(parts, limit):
+        out = " ".join(parts).strip()
+        if len(out) > limit:
+            out = out[:limit].rsplit(" ", 1)[0] + "…"
+        return out
 
-    # Sources are URL buttons, not text. Use only the verified Wikipedia page title
-    # so malformed upstream Markdown can never reach Telegram.
+    what = trim_block(main, 1550)
+    later_text = trim_block(later, 1050)
+
+    detail_parts = [
+        f"📖 {item['year']} — {item['title']}",
+        "",
+        "📌 Главное",
+        what or "Подробное описание события в доступном источнике отсутствует."
+    ]
+
+    if later_text:
+        detail_parts.extend(["", "📍 Что было дальше", later_text])
+
+    # Если материала мало, добавляем короткий факт из календарной записи,
+    # но только если он не дублирует уже показанный текст.
+    calendar_text = clean_source(ev.get("text", ""))
+    if len(detail_parts[-1]) < 300 and calendar_text:
+        extra = calendar_text
+        if extra.casefold() not in what.casefold():
+            detail_parts.extend(["", "🔎 Дополнительный факт", extra[:500]])
+
+    detail = "\n".join(detail_parts).strip()
+
+    # Telegram ограничивает sendMessage 4096 символами. Оставляем запас
+    # под служебные строки и не обрезаем посередине слова.
+    if len(detail) > 3800:
+        detail = detail[:3797].rsplit(" ", 1)[0] + "…"
+
+    # Источник прикрепляем как настоящую URL-кнопку Telegram, а не как
+    # Markdown-ссылку внутри текста. Это надёжнее для мобильных клиентов.
+    source_buttons = []
     if page_title:
-        wiki_url = "https://ru.wikipedia.org/wiki/" + quote(page_title.replace(" ", "_"), safe="()")
-        send(chat, "Источники:", [[{"text": "📚 Открыть Wikipedia", "url": wiki_url}]])
+        wiki_url = "https://ru.wikipedia.org/wiki/" + quote(
+            page_title.replace(" ", "_"),
+            safe="()"
+        )
+        source_buttons.append([
+            {"text": "📚 Открыть Wikipedia", "url": wiki_url}
+        ])
 
+    source_buttons.append([
+        {"text": "↩️ К событиям", "callback_data": "hist_back"}
+    ])
 
-    send(chat, "↩️ Вернуться к списку событий", [[{"text": "↩️ К событиям", "callback_data": "hist_back"}]])
+    send(chat, detail, source_buttons)
 def world_keyboard():
     return [
         [{"text": "🌍 Мировые новости"}],
