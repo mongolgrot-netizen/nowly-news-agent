@@ -264,6 +264,7 @@ def setup_webhook():
         print("Webhook setup error:", repr(e))
 
 def send(chat, text, buttons=None):
+    text = str(text).replace('\\n', '\n')
     data = {
         "chat_id": chat,
         "text": text,
@@ -1153,9 +1154,10 @@ def process_news(chat, category="news", region=None):
         }
         rec = "🟢 рекомендовано к публикации" if recommendation == "publish" else "🔴 лучше НЕ публиковать"
         source_names = []
+        allowed_names = ('BBC', 'Reuters', 'AP', 'NPR', 'The Guardian', 'DW', 'Al Jazeera', 'France 24', 'CNN', 'MIT')
         for x in related:
             m = re.search(r"\[Редакция:\s*([^\]]+)\]", str(x[2]))
-            if m and m.group(1) not in source_names:
+            if m and any(a.lower() in m.group(1).lower() for a in allowed_names) and m.group(1) not in source_names:
                 source_names.append(m.group(1))
         if not source_names:
             source_names = [re.sub(r"^www\\.", "", re.sub(r"^https?://", "", link)).split("/")[0]]
