@@ -730,6 +730,10 @@ def search_related_news(target, max_items=8):
     publishers = [("reuters.com","Reuters"),("apnews.com","AP"),("bbc.com","BBC"),("bbc.co.uk","BBC"),("news.sky.com","Sky News"),("theguardian.com","The Guardian"),("itv.com","ITV News"),("aljazeera.com","Al Jazeera"),("dw.com","DW"),("france24.com","France 24"),("npr.org","NPR"),("kpbs.org","NPR"),("wxxi.org","NPR")]
     legal_story = any(k in raw_text for k in ("проект", "постановлен", "закон", "минцифры", "госуслуг", "правительств", "почтов"))
     if legal_story:
+        base_queries.insert(0, "электронная почтовая система Госуслуги Минцифры")
+        base_queries.insert(1, "проект постановления электронная почтовая система")
+        base_queries.insert(2, "Минцифры проект постановления почтовая система")
+    if legal_story:
         publishers += [("interfax.ru","Interfax"),("1prime.ru","ПРАЙМ"),("garant.ru","ГАРАНТ"),("consultant.ru","КонсультантПлюс"),("regulation.gov.ru","regulation.gov.ru")]
     queries = []
     # Check BBC/NPR co-publishing first so the small result budget is not consumed by duplicates.
@@ -798,7 +802,7 @@ def search_related_news(target, max_items=8):
                 seen.add(key)
                 # Preserve the publisher name explicitly. Google News often wraps
                 # publisher links, so the RSS <source> field is more reliable than URL.
-                publisher_label = source_name or (expected_source[1] if expected_source else "")
+                publisher_label = (expected_source[1] if expected_source else source_name)
                 if publisher_label:
                     sm = f"[Редакция: {publisher_label}] {sm}".strip()
                 out.append((t,l,sm))
