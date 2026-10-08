@@ -679,11 +679,6 @@ def search_related_news(target, max_items=10):
         if w not in stop and w not in distinctive:
             distinctive.append(w)
     distinctive = distinctive[:14]
-    # Explicitly search likely co-publishers for investigative stories.
-    if any(x in raw_text for x in ("bbc", "британск", "би-би-си")):
-        base_queries.insert(0, "NPR BBC " + " ".join(distinctive[:5]))
-    if "npr" in raw_text:
-        base_queries.insert(0, "NPR BBC " + " ".join(distinctive[:5]))
     proper = re.findall(r"\b(?:RAF|Fairford|US|UK|No10|BBC|AP|Reuters|Trump|London|Ukraine|Russia|NATO|Iran|Israel)\b", title, re.I)
     proper = list(dict.fromkeys(proper))
     base_queries = []
@@ -697,6 +692,11 @@ def search_related_news(target, max_items=10):
         title_terms = re.findall(r"[A-Z][A-Za-z0-9-]{2,}|[А-ЯЁ][А-ЯЁа-яё-]{3,}", title)
         if len(title_terms) >= 2:
             base_queries.append(" ".join(title_terms[:5]))
+    # Explicitly search likely co-publishers for investigative stories.
+    if any(x in raw_text for x in ("bbc", "британск", "би-би-си")):
+        base_queries.insert(0, "NPR BBC " + " ".join(distinctive[:5]))
+    if "npr" in raw_text:
+        base_queries.insert(0, "NPR BBC " + " ".join(distinctive[:5]))
 
     publishers = [("reuters.com","Reuters"),("apnews.com","AP"),("bbc.com","BBC"),("bbc.co.uk","BBC"),("news.sky.com","Sky News"),("theguardian.com","The Guardian"),("itv.com","ITV News"),("aljazeera.com","Al Jazeera"),("dw.com","DW"),("france24.com","France 24"),("npr.org","NPR")]
     queries = []
