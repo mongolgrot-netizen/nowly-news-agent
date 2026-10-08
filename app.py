@@ -964,9 +964,51 @@ def history_detail(chat, number):
 
         return True
 
+    def reflow_editorial(text):
+        if not text:
+            return text
+
+        text = re.sub(r"\\r\\n?", "\\n", text).strip()
+        text = re.sub(r"(?m)^\\s*(?:#+\\s*)?📌\\s*Что произошло\\s*$", "📌 Что произошло", text)
+        text = re.sub(r"(?m)^\\s*(?:#+\\s*)?📍\\s*Что было дальше\\s*$", "📍 Что было дальше", text)
+
+        # Даже если модель вернула один длинный абзац, разбиваем его по
+        # предложениям. Содержание при этом не меняется.
+        sections = re.split(r"(?m)^📍 Что было дальше\\s*$", text, maxsplit=1)
+        main = sections[0].strip()
+        later = sections[1].strip() if len(sections) > 1 else ""
+
+        def paragraphize(block, max_sentences=2):
+            lines = [x.strip() for x in block.split("\\n") if x.strip()]
+            heading = ""
+            if lines and lines[0] == "📌 Что произошло":
+                heading = lines.pop(0)
+            sentences = []
+            for line in lines:
+                sentences.extend([
+                    s.strip() for s in re.split(r"(?<=[.!?])\\s+(?=[А-ЯЁA-Z0-9])", line)
+                    if s.strip()
+                ])
+            paras = []
+            for i in range(0, len(sentences), max_sentences):
+                paras.append(" ".join(sentences[i:i + max_sentences]))
+            return heading, paras
+
+        main_heading, main_paras = paragraphize(main)
+        later_heading, later_paras = paragraphize("📌 Что произошло\\n" + later) if later else ("", [])
+
+        out = []
+        if main_heading:
+            out.append(main_heading)
+        out.extend(main_paras)
+        if later_paras:
+            out.append("📍 Что было дальше")
+            out.extend(later_paras)
+        return "\\n\\n".join(out).strip()
+
     edited = editorial_rewrite(base)
     if edited and validate_editorial(edited, base):
-        detail_body = edited
+        detail_body = reflow_editorial(edited)
     else:
         # Безопасный fallback: только предложения из проверенного источника.
         parts = ["📌 Что произошло", fallback_main or "Подробное описание события в доступном источнике отсутствует."]
