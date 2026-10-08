@@ -432,16 +432,20 @@ HISTORY_CACHE = {}  # chat_id -> {"date": str, "scope": str, "region": str|None,
 
 def _history_source_lines(ev):
     lines = []
+    seen = set()
     for p in ev.get("pages") or []:
         url = (p.get("url") or "").strip()
         if url:
-            lines.append("Wikipedia: " + url)
+            url = url.replace("\\", "")
+            # Telegram should receive a plain URL, never Markdown.
+            if url not in seen:
+                lines.append("Wikipedia: " + url)
+                seen.add(url)
     rw = ev.get("ruwiki") or {}
-    url = (rw.get("url") or "").strip()
-    if url:
+    url = (rw.get("url") or "").strip().replace("\\", "")
+    if url and url not in seen:
         lines.append("Рувики: " + url)
-    return "\n".join(dict.fromkeys(lines))
-
+    return "\n".join(lines)
 def _history_wiki_extract(title):
     """Fetch the actual free Wikipedia article extract for a selected event."""
     if not title:
