@@ -779,8 +779,8 @@ def history_detail(chat, number):
     ev = item["source"]
     page_title = ((ev.get("pages") or [{}])[0].get("title") or "").strip()
 
-    # Берём только проверяемый исходный материал. Никакого AI-пересказа:
-    # это исключает выдуманные детали и редакторские домыслы.
+    # Получаем первичный материал из Wikipedia/Рувики. AI используется только
+    # как редактор: он не ищет факты и не получает право добавлять сведения.
     wiki_extract = (
         _history_wiki_extract(page_title)
         if page_title and not re.fullmatch(r"\d{4}\s*год(?:а)?", page_title, re.I)
@@ -794,8 +794,6 @@ def history_detail(chat, number):
         text = re.sub(r"(?m)^\s*={2,6}\s*(.*?)\s*={2,6}\s*$", r"\1", text)
         text = re.sub(r"\[\d+\]", "", text)
         text = re.sub(r"\{\{[^{}]+\}\}", "", text)
-        # Обрезаем служебные/справочные разделы Wikipedia и не переносим
-        # в NOWLY длинную предысторию, которая не относится к самому событию.
         text = re.split(
             r"(?i)\bПредыстория\b|\bСм\. также\b|\bПримечания\b|\bЛитература\b|\bСсылки\b",
             text,
@@ -811,13 +809,11 @@ def history_detail(chat, number):
             if len(s.strip()) >= 35
         ]
 
-    # Сначала используем Wikipedia, затем Рувики, затем исходную запись
-    # календаря. Так материал остаётся привязанным к конкретному событию.
     base = clean_source(wiki_extract) or clean_source(rw_extract) or clean_source(ev.get("text", ""))
     sentences = split_sentences(base)
 
-    # Убираем типичные фрагменты, которые не нужны в короткой редакционной
-    # заметке NOWLY и могут уводить материал в сторону от самого события.
+    # Удаляем известные редакционные/спекулятивные фрагменты, которые не должны
+    # попадать в NOWLY как установленные факты.
     bad = (
         "по оценкам нескольких источников",
         "повлиял лично на президента",
@@ -836,12 +832,9 @@ def history_detail(chat, number):
         for s in safe
     ]
 
-    # Не даём статье разрастись: Telegram должен получить насыщенный,
-    # но читаемый материал.
     if not safe:
         safe = sentences
 
-    # Убираем повторяющиеся предложения.
     unique = []
     seen = set()
     for s in safe:
@@ -851,46 +844,116 @@ def history_detail(chat, number):
             unique.append(s)
     safe = unique
 
-    # Первые 3–4 предложения обычно содержат основную канву события.
-    # Следующие предложения используем как последствия/дальнейшее развитие.
-    main = safe[:4]
-    later = safe[4:8]
+    # Базовый безопасный вариант. Он используется и как fallback, если AI
+    # недоступен или нарушил правила фактологической проверки.
+    fallback_main = " ".join(safe[:6]).strip()
+    fallback_later = " ".join(safe[6:10]).strip()
 
-    def trim_block(parts, limit):
-        out = " ".join(parts).strip()
-        if len(out) > limit:
-            out = out[:limit].rsplit(" ", 1)[0] + "…"
-        return out
+    def trim_block(text, limit):
+        text = re.sub(r"\s+", " ", text or "").strip()
+        if len(text) > limit:
+            text = text[:limit].rsplit(" ", 1)[0] + "…"
+        return text
 
-    what = trim_block(main, 1550)
-    later_text = trim_block(later, 1050)
+    fallback_main = trim_block(fallback_main, 1700)
+    fallback_later = trim_block(fallback_later, 1100)
 
-    # Нормализуем заголовок для Telegram и аккуратно атрибутируем
-    # спорные заявления, не выдавая их за установленный факт.
+    def editorial_rewrite(source_text):
+        if not GROQ_KEY or not source_text:
+            return None
+
+        prompt = f"""Ты редактор исторической рубрики Telegram-канала NOWLY.
+
+Твоя задача — превратить исходный исторический материал ниже в короткую, полноценную редакционную заметку.
+
+КРИТИЧЕСКОЕ ПРАВИЛО:
+Используй ТОЛЬКО факты, прямо содержащиеся в исходном материале. Нельзя добавлять ни одной новой детали, цифры, даты, причины, мотива, оценки, последствия или имя, которого нет в источнике.
+Нельзя делать выводы от себя.
+Нельзя использовать знания из памяти.
+Нельзя писать предысторию, если она не является частью описания самого события.
+Если в источнике есть заявление стороны, сохрани атрибуцию: «заявила», «сообщила», «по данным источника» и т.п.
+Не превращай спорное утверждение в установленный факт.
+
+ФОРМАТ:
+Первая строка: 📌 Что произошло
+Затем 2–4 коротких абзаца с фактическим описанием события.
+Если в источнике действительно есть сведения о последующих событиях, добавь отдельную строку «📍 Что было дальше» и 1–2 коротких абзаца.
+Если таких сведений нет — не добавляй этот раздел.
+Не добавляй источники, ссылки, комментарии редактора и заключение.
+Не используй Markdown-заголовки, списки или кавычки вокруг всего текста.
+
+ИСХОДНЫЙ МАТЕРИАЛ:
+{source_text[:12000]}
+"""
+        try:
+            result = groq(prompt, 0.0, 650)
+            return result.strip()
+        except Exception as e:
+            print("HISTORY EDITOR ERROR:", repr(e))
+            return None
+
+    def validate_editorial(text, source_text):
+        if not text:
+            return False
+
+        low = text.casefold()
+        forbidden = (
+            "по оценкам нескольких источников",
+            "повлиял лично на президента",
+            "непосредственно вовлечён",
+            "северный поток",
+            "70-летия",
+            "как известно",
+            "считается, что",
+            "вероятно",
+            "возможно",
+            "предположительно",
+        )
+        if any(x in low for x in forbidden):
+            return False
+
+        # AI не должен добавлять новые числа/годы, которых нет в источнике.
+        src_nums = set(re.findall(r"\b\d+(?:[.,]\d+)?\b", source_text))
+        out_nums = set(re.findall(r"\b\d+(?:[.,]\d+)?\b", text))
+        if not out_nums.issubset(src_nums):
+            return False
+
+        # Убираем служебные строки и проверяем, что каждый содержательный
+        # абзац имеет заметную лексическую опору в исходном материале.
+        src_words = set(re.findall(r"[а-яёa-z]{4,}", source_text.casefold()))
+        paragraphs = [
+            p.strip() for p in text.split("\n\n")
+            if p.strip() and not p.strip().startswith(("📌", "📍"))
+        ]
+        if not paragraphs:
+            return False
+
+        for p in paragraphs:
+            words = set(re.findall(r"[а-яёa-z]{4,}", p.casefold()))
+            overlap = len(words & src_words)
+            if len(words) >= 10 and overlap / max(len(words), 1) < 0.28:
+                return False
+
+        return True
+
+    edited = editorial_rewrite(base)
+    if edited and validate_editorial(edited, base):
+        detail_body = edited
+    else:
+        # Безопасный fallback: только предложения из проверенного источника.
+        parts = ["📌 Что произошло", fallback_main or "Подробное описание события в доступном источнике отсутствует."]
+        if fallback_later:
+            parts.extend(["", "📍 Что было дальше", fallback_later])
+        detail_body = "\n".join(parts)
+
     display_title = re.sub(r"[.!?]+$", "", str(item["title"]).strip())
-    detail_parts = [
-        f"📖 {item['year']} — {display_title}",
-        "",
-        "📌 Главное",
-        what or "Подробное описание события в доступном источнике отсутствует."
-    ]
+    detail = f"📖 {item['year']} — {display_title}\n\n{detail_body}".strip()
 
-    if later_text:
-        detail_parts.extend(["", "📍 Что было дальше", later_text])
-
-    # Не добавляем искусственный «дополнительный факт»: календарная запись
-    # часто является тем же самым заголовком события и создаёт дублирование.
-    # Если основной материал короткий, лучше оставить его компактным и точным.
-
-    detail = "\n".join(detail_parts).strip()
-
-    # Telegram ограничивает sendMessage 4096 символами. Оставляем запас
-    # под служебные строки и не обрезаем посередине слова.
+    # Telegram ограничивает sendMessage 4096 символами.
     if len(detail) > 3800:
         detail = detail[:3797].rsplit(" ", 1)[0] + "…"
 
-    # Источник прикрепляем как настоящую URL-кнопку Telegram, а не как
-    # Markdown-ссылку внутри текста. Это надёжнее для мобильных клиентов.
+    # Источник остаётся настоящей URL-кнопкой Telegram.
     source_buttons = []
     if page_title:
         wiki_url = "https://ru.wikipedia.org/wiki/" + quote(
@@ -906,6 +969,7 @@ def history_detail(chat, number):
     ])
 
     send(chat, detail, source_buttons)
+
 def world_keyboard():
     return [
         [{"text": "🌍 Мировые новости"}],
