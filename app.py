@@ -728,6 +728,9 @@ def search_related_news(target, max_items=8):
         base_queries.insert(3, '"BBC and NPR" "Austin Tice" site:wxxi.org')
 
     publishers = [("reuters.com","Reuters"),("apnews.com","AP"),("bbc.com","BBC"),("bbc.co.uk","BBC"),("news.sky.com","Sky News"),("theguardian.com","The Guardian"),("itv.com","ITV News"),("aljazeera.com","Al Jazeera"),("dw.com","DW"),("france24.com","France 24"),("npr.org","NPR"),("kpbs.org","NPR"),("wxxi.org","NPR")]
+    legal_story = any(k in raw_text for k in ("проект", "постановлен", "закон", "минцифры", "госуслуг", "правительств", "почтов"))
+    if legal_story:
+        publishers += [("interfax.ru","Interfax"),("1prime.ru","ПРАЙМ"),("garant.ru","ГАРАНТ"),("consultant.ru","КонсультантПлюс"),("regulation.gov.ru","regulation.gov.ru")]
     queries = []
     # Check BBC/NPR co-publishing first so the small result budget is not consumed by duplicates.
     for domain, publisher_name in publishers:
@@ -778,7 +781,12 @@ def search_related_news(target, max_items=8):
                         "france24.com": ["france 24"],
                         "npr.org": ["npr", "national public radio", "npr news", "npr.org"],
                         "kpbs.org": ["kpbs", "npr"],
-                        "wxxi.org": ["wxxi", "npr"]
+                        "wxxi.org": ["wxxi", "npr"],
+                        "interfax.ru": ["interfax"],
+                        "1prime.ru": ["прайм", "1prime"],
+                        "garant.ru": ["гарант", "garant"],
+                        "consultant.ru": ["консультант", "consultant"],
+                        "regulation.gov.ru": ["regulation.gov.ru"]
                     }
                     names = aliases.get(expected_domain, [expected_name.lower()])
                     if not any(a in low for a in names):
