@@ -438,7 +438,7 @@ def _history_clean_ai(text):
     )
     # Remove any remaining Markdown link brackets around URLs.
     text = re.sub(r"\[(https?://[^\]]+)\]", r"\1", text)
-    text = text.replace("\\\\-", "-")
+    text = text.replace("\\-", "-")
     text = re.sub(r"(?m)^\s*[-*]\s+", "- ", text)
     return text.strip()
 
@@ -818,7 +818,10 @@ def history_detail(chat, number):
         detail = re.sub(r"\n?Источники:\s*[\s\S]*$", "", detail, flags=re.I).strip()
         detail = _history_clean_ai(detail)
         if source_text:
-            detail += "\n\nИсточники:\n" + source_text
+            # Keep source URLs outside the AI text and never let Markdown
+            # link syntax leak into Telegram.
+            clean_sources = _history_clean_ai(source_text)
+            detail += "\n\nИсточники:\n" + clean_sources
 
     if not detail:
         detail = (
