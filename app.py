@@ -761,93 +761,53 @@ def history_detail(chat, number):
     wiki_extract = _history_wiki_extract(page_title) if page_title and not re.fullmatch(r"\d{4}\s*год(?:а)?", page_title, re.I) else ""
     rw_extract = ((ev.get("ruwiki") or {}).get("extract") or "").strip()
 
-    def clean_extract(text):
-        if not text:
-            return ""
-        text = re.sub(r"(?m)^\s*={2,6}\s*(.*?)\s*={2,6}\s*$", r"\1", text)
+    def clean(text):
+        text = re.sub(r"(?m)^\s*={2,6}\s*(.*?)\s*={2,6}\s*$", r"\1", text or "")
         text = re.sub(r"\[\d+\]", "", text)
+        text = re.sub(r"(?i)\b(?:Предыстория|См\. также|Примечания|Литература|Ссылки)\b.*$", "", text)
         return re.sub(r"\s+", " ", text).strip()
 
-    def trim_source(text):
-        if not text:
-            return ""
-        return re.split(r"(?im)\b(?:Предыстория|См\. также|Примечания|Литература|Ссылки)\b", text, maxsplit=1)[0].strip()
+    base = clean(wiki_extract) or clean(rw_extract) or ev.get("text", "").strip()
 
-    wiki_core = trim_source(clean_extract(wiki_extract))
-    rw_core = trim_source(clean_extract(rw_extract))
-    evidence = {
-        "calendar_event": ev.get("text", ""),
-        "wikipedia": wiki_core[:5000],
-        "ruwiki": rw_core[:5000]
-    }
+    # Fully deterministic: no AI is used for the detailed history article.
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", base) if len(s.strip()) > 20]
+    core = " ".join(sentences[:10])
+    if len(core) > 2300:
+        core = core[:2300].rsplit(" ", 1)[0] + "…"
 
-    prompt = f"""Ты редактор исторической рубрики NOWLY.
-Напиши самостоятельный короткий фактический материал.
-
-Год: {item["year"]}
-Название: {item["title"]}
-Дата: {cache["date"]}
-
-Используй ТОЛЬКО исходные данные ниже. Не используй память модели.
-Не копируй источник дословно.
-Не добавляй оценки, мотивы, предположения, политические выводы или сведения о влиянии на политиков.
-Не добавляй факты, которых нет в исходных данных.
-Не используй «по оценкам», если конкретная оценка не дана в исходных данных.
-Не включай длинную предысторию.
-
-ФОРМАТ:
-📖 {item["year"]} — {item["title"]}
-
-Что произошло:
-3–4 коротких предложения о самом событии.
-
-Ключевые факты:
-• 4–6 конкретных фактов.
-
-Что было дальше:
-1–2 предложения только о подтверждённом продолжении события.
-
-Если факта нет — НЕ выдумывай.
-Не добавляй раздел Источники.
-Не используй Markdown, квадратные скобки, обратные слэши или URL.
-
-ИСХОДНЫЕ ДАННЫЕ:
-{json.dumps(evidence, ensure_ascii=False)}
-"""
-    try:
-        detail = groq(prompt, 0.05, 1800).strip()
-    except Exception as ex:
-        print("HISTORY DETAIL AI:", repr(ex))
-        detail = ""
-
-    detail = _history_clean_ai(detail) if detail else ""
-    normalized = re.sub(r"\s+", " ", detail).casefold()
-    forbidden = (
-        "по оценкам нескольких источников",
-        "повлиял лично на президента",
-        "сам путин был непосредственно вовлечён",
-        "северный поток 1—2",
-        "предыстория после аннексии",
+    # Build a clean NOWLY article only from source sentences.
+    detail = (
+        f"📖 {item['year']} — {item['title']}\n\n"
+        f"Что произошло:\n{core}\n"
     )
-    if len(detail) < 500 or any(x in normalized for x in forbidden):
-        detail = ""
 
-    if not detail:
-        base = wiki_core or rw_core or ev.get("text", "")
-        sentences = [x.strip() for x in re.split(r"(?<=[.!?])\s+", base) if len(x.strip()) > 20]
-        core = " ".join(sentences[:12])
-        if len(core) > 2200:
-            core = core[:2200].rsplit(" ", 1)[0] + "…"
-        detail = f"📖 {item['year']} — {item['title']}\n\nЧто произошло:\n{core}\n"
+    # Add only source-backed continuation if it is present in the first source text.
+    if len(sentences) > 10:
+        later = " ".join(sentences[10:13])
+        if later:
+            detail += f"\nЧто было дальше:\n{later}\n"
 
-    detail = re.sub(r"(?is)\n?Источники:\s*.*$", "", detail).strip()
-    detail = re.sub(r"(?m)^\s*={2,6}\s*(.*?)\s*={2,6}\s*$", r"\1", detail)
-    detail = re.sub(r"(?m)^\s*(Предыстория|См\. также|Примечания|Литература|Ссылки)\s*$", "", detail, flags=re.I)
-    detail = re.sub(r"\n{3,}", "\n\n", detail).strip()
-    if source_text:
-        detail += "\n\nИсточники:\n" + source_text
+    # Normalize all source URLs before they reach Telegram.
+    urls = []
+    for p in ev.get("pages") or []:
+        url = (p.get("url") or "").strip()
+        if url:
+            urls.append("Wikipedia: " + url)
+    rw = ev.get("ruwiki") or {}
+    if rw.get("url"):
+        urls.append("Рувики: " + rw["url"].strip())
+    sources = "\n".join(dict.fromkeys(urls))
+    if sources:
+        detail += "\nИсточники:\n" + sources
 
-    chunks, rest = [], detail.strip()
+    # Final safety cleanup: no Markdown link syntax can remain.
+    detail = re.sub(r"\[([^\]]+)\]\((https?://[^\s]+)\)", r"\1: \2", detail)
+    detail = re.sub(r"\[(https?://[^\]]+)\]\([^\n]*\)", r"\1", detail)
+    detail = re.sub(r"\[(https?://[^\]]+)\]", r"\1", detail)
+    detail = re.sub(r"\\(?=[-*_=[\]()])", "", detail)
+
+    chunks = []
+    rest = detail.strip()
     while len(rest) > 3900:
         cut = rest.rfind("\n\n", 0, 3900)
         if cut < 1200:
@@ -858,6 +818,7 @@ def history_detail(chat, number):
         rest = rest[cut:].strip()
     if rest:
         chunks.append(rest)
+
     for part in chunks:
         send(chat, part)
     send(chat, "↩️ Вернуться к списку событий", [[{"text": "↩️ К событиям", "callback_data": "hist_back"}]])
