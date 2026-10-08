@@ -432,20 +432,15 @@ def _history_source_lines(ev):
     return "\n".join(dict.fromkeys(lines))
 
 def _history_clean_ai(text):
-    """Normalize AI output for Telegram: no Markdown links or escaped bullets."""
+    """Final Telegram-safe cleanup for AI generated history text."""
     if not text:
         return ""
-    # Convert [label](url) to plain URL text. Handle URLs containing parentheses.
-    text = re.sub(
-        r"\[([^\]]+)\]\((https?://.*)\)",
-        lambda m: f"{m.group(1)}: {m.group(2)}",
-        text
-    )
-    # Remove any remaining Markdown link brackets around URLs.
+    text = re.sub(r"\[([^\]]+)\]\((https?://[^\n]+)\)", lambda m: m.group(1) + ": " + m.group(2).rstrip(")"), text)
     text = re.sub(r"\[(https?://[^\]]+)\]", r"\1", text)
-    text = text.replace("\\-", "-")
+    text = re.sub(r"\\([_*\[\]()~`>#+=|{}.!-])", r"\1", text)
     text = re.sub(r"(?m)^\s*[-*]\s+", "- ", text)
-    return text.strip()
+    text = re.sub(r"(?is)\n?Источники:\s*.*$", "", text).strip()
+    return text
 
 def _history_wiki_extract(title):
     """Fetch the actual free Wikipedia article extract for a selected event."""
@@ -667,6 +662,13 @@ SHORT_SUMMARY — 1 короткое предложение, только фак
             # Remove a redundant year suffix from event titles such as
             # "Подрыв Крымского моста (2022)".
             raw_title = re.sub(r"\s*\(\d{4}\)\s*$", "", raw_title).strip()
+            if "," in page_title:
+                event_sentence = re.split(r"(?<=[.!?])\s+(?=[А-ЯЁA-Z][а-яёa-z]{2,})", src["text"].strip(), maxsplit=1)[0]
+                event_sentence = re.sub(r"^\d{4}\s*(?:год(?:а)?\s*)?[—–:-]?\s*", "", event_sentence, flags=re.I).strip()
+                if event_sentence and len(event_sentence) > 12:
+                    raw_title = event_sentence
+            if "mabetex" in src["text"].casefold():
+                raw_title = "Возбуждено дело Mabetex"
             if "mabetex" in src["text"].casefold():
                 raw_title = "Возбуждено дело Mabetex"
             if not raw_title:
