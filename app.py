@@ -958,29 +958,22 @@ def history_detail(chat, number):
         # reflow_editorial() ниже сам разобьёт его по предложениям.
         body_text = re.sub(r"(?m)^\s*[📌📍].*$", "", text)
         body_text = re.sub(r"\s+", " ", body_text).strip()
+
+        # Короткий материал допустим: главное — фактологическая точность
+        # и отсутствие прямого копирования. Не требуем искусственно 3+ предложений,
+        # иначе хорошие редакторские ответы ошибочно уходят в fallback.
         sentences_count = len([
             s for s in re.split(r"(?<=[.!?])\s+", body_text)
             if s.strip()
         ])
-        if sentences_count < 3:
+        if sentences_count < 2:
             return False
         if len(body_text) > 3000:
             return False
 
-        src_words = set(re.findall(r"[а-яёa-z]{4,}", source_text.casefold()))
-        paragraphs = [
-            p.strip() for p in text.split("\n\n")
-            if p.strip() and not p.strip().startswith(("📌", "📍"))
-        ]
-        if not paragraphs:
-            return False
-
-        for p in paragraphs:
-            words = set(re.findall(r"[а-яёa-z]{4,}", p.casefold()))
-            overlap = len(words & src_words)
-            if len(words) >= 10 and overlap / max(len(words), 1) < 0.28:
-                return False
-
+        # Не требуем низкого общего совпадения слов с источником: исторические
+        # тексты неизбежно повторяют имена, даты, названия и термины.
+        # Прямое последовательное копирование уже проверяется выше.
         return True
 
     def reflow_editorial(text):
