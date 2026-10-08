@@ -809,20 +809,12 @@ def history_detail(chat, number):
 
     send(chat, detail.strip())
 
-    # Sources are now Telegram URL buttons. No URL text means no possible Markdown corruption.
-    buttons = []
+    # Sources are URL buttons, not text. Use only the verified Wikipedia page title
+    # so malformed upstream Markdown can never reach Telegram.
     if page_title:
         wiki_url = "https://ru.wikipedia.org/wiki/" + quote(page_title.replace(" ", "_"), safe="()")
-        buttons.append({"text": "📚 Wikipedia", "url": wiki_url})
+        send(chat, "Источники:", [[{"text": "📚 Открыть Wikipedia", "url": wiki_url}]])
 
-    rw = ev.get("ruwiki") or {}
-    rw_title = str(rw.get("title") or page_title).strip()
-    if rw_title:
-        rw_url = "https://ru.ruwiki.ru/wiki/" + quote(rw_title.replace(" ", "_"), safe="()")
-        buttons.append({"text": "📚 Рувики", "url": rw_url})
-
-    if buttons:
-        send(chat, "Источники:", [buttons])
 
     send(chat, "↩️ Вернуться к списку событий", [[{"text": "↩️ К событиям", "callback_data": "hist_back"}]])
 def world_keyboard():
