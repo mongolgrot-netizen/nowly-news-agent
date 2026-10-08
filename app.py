@@ -667,7 +667,7 @@ def related_items(target, items, max_items=5):
     scored.sort(key=lambda x: x[0], reverse=True)
     return [x[1] for x in scored[:max_items]]
 
-def search_related_news(target, max_items=10):
+def search_related_news(target, max_items=8):
     """Free cross-source verification through Google News RSS."""
     title = target[0] if target else ""
     summary = target[2] if len(target) > 2 else ""
@@ -937,7 +937,7 @@ def process_news(chat, category="news", region=None):
     title, link, summary, region_tag = selected[0]
     try:
         related = related_items((title, link, summary, region_tag), items, max_items=3)
-        searched = search_related_news((title, link, summary, region_tag), max_items=3)
+        searched = search_related_news((title, link, summary, region_tag), max_items=8)
         telegram_sources = search_telegram_news((title, link, summary, region_tag), max_items=3)
 
         pool = related + searched + telegram_sources
