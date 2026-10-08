@@ -867,13 +867,9 @@ def history_detail(chat, number):
     if later_text:
         detail_parts.extend(["", "📍 Что было дальше", later_text])
 
-    # Если материала мало, добавляем короткий факт из календарной записи,
-    # но только если он не дублирует уже показанный текст.
-    calendar_text = clean_source(ev.get("text", ""))
-    if len(detail_parts[-1]) < 300 and calendar_text:
-        extra = calendar_text
-        if extra.casefold() not in what.casefold():
-            detail_parts.extend(["", "🔎 Дополнительный факт", extra[:500]])
+    # Не добавляем искусственный «дополнительный факт»: календарная запись
+    # часто является тем же самым заголовком события и создаёт дублирование.
+    # Если основной материал короткий, лучше оставить его компактным и точным.
 
     detail = "\n".join(detail_parts).strip()
 
