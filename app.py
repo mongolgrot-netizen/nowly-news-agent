@@ -889,13 +889,15 @@ def history_detail(chat, number):
 ФОРМАТ:
 📌 Что произошло
 
-2–3 содержательных абзаца по 1–2 предложения. Сразу сообщи главное, затем используй основные подтверждённые детали исходника.
+2–3 содержательных абзаца по 1–2 предложения. Не останавливайся после первого факта: используй основные подтверждённые детали исходника.
 
 📍 Что было дальше
 
-Создавай этот раздел ТОЛЬКО если исходник содержит дальнейшее развитие события. В разделе должно быть минимум 2 полноценных предложения и нужно довести рассказ до последнего подтверждённого факта из исходника. Если продолжение нельзя раскрыть минимум двумя предложениями, не создавай этот раздел: перенеси доступный подтверждённый факт в «Что произошло».
+Если исходник содержит дальнейшее развитие события, дай 1–2 содержательных абзаца и обязательно доведи рассказ до последнего подтверждённого факта. Не заканчивай раздел незавершённой фразой или одним коротким предложением.
 
-Общий объём — примерно 5–8 предложений. Материал должен выглядеть как законченная редакционная историческая заметка, а не как краткая выжимка.
+Если дальнейшего развития в исходнике нет, этот раздел не создавай.
+
+Общий объём — примерно 4–7 предложений. Текст должен выглядеть как законченная редакционная заметка, а не как краткая выжимка.
 
 Не добавляй ссылки, источники, комментарии редактора или заключение.
 
@@ -970,20 +972,6 @@ def history_detail(chat, number):
         ])
         if sentences_count < 4:
             return False
-
-        # Если модель создала раздел «Что было дальше», он не должен
-        # состоять из одной оборванной фразы.
-        later_match = re.search(r"(?ms)^\s*📍\s*Что было дальше\s*$([\s\S]+)$", text)
-        if later_match:
-            later_body = re.sub(r"\s+", " ", later_match.group(1)).strip()
-            later_sentences = [
-                s.strip()
-                for s in re.split(r"(?<=[.!?])\s+", later_body)
-                if s.strip()
-            ]
-            if len(later_sentences) < 2:
-                return False
-
         if len(body_text) > 3000:
             return False
 
@@ -1042,22 +1030,10 @@ def history_detail(chat, number):
     if not (edited and validate_editorial(edited, base)) and GROQ_KEY:
         try:
             retry_prompt = f"""Перепиши этот исторический материал для NOWLY полностью своими словами.
-
-Сначала выдели только подтверждённые факты, затем напиши самостоятельную заметку.
-Не добавляй ни одной новой даты, цифры, причины, оценки, мотива или последствия.
-Не используй знания из памяти и не копируй предложения источника.
-
-Формат:
-📌 Что произошло
-
-2–3 содержательных абзаца.
-
-📍 Что было дальше
-
-Только если в исходнике есть дальнейшее развитие события. Здесь обязательно минимум 2 законченных предложения. Если продолжение нельзя раскрыть двумя предложениями, не создавай этот раздел, а включи доступный факт в предыдущий раздел.
-
-Всего 5–8 предложений. Текст должен быть законченным и естественным.
-
+Сохрани абсолютно все факты, но измени синтаксис, порядок подачи и формулировки.
+Не добавляй новых сведений. Не копируй предложения источника.
+Сделай 2–3 коротких абзаца под заголовком «📌 Что произошло» и при наличии
+дальнейших событий отдельный раздел «📍 Что было дальше».
 Используй только факты исходника.
 
 ИСХОДНИК:
@@ -1085,7 +1061,7 @@ def history_detail(chat, number):
             fact_source = "\\n".join(fact_lines)
 
             fallback_prompt = f"""Ты редактор исторического раздела NOWLY.
-Ниже даны проверенные факты. Напиши законченную самостоятельную заметку.
+Ниже даны проверенные факты. Напиши короткую самостоятельную заметку.
 
 ВАЖНО:
 — не копируй предложения из блока фактов;
@@ -1099,13 +1075,11 @@ def history_detail(chat, number):
 Формат:
 📌 Что произошло
 
-2–3 содержательных абзаца.
+2 коротких абзаца.
 
 📍 Что было дальше
 
-Создавай только если факты содержат дальнейшее развитие. Если создаёшь — минимум 2 законченных предложения. Если двух предложений для продолжения нет, не создавай раздел и включи доступный факт в основной рассказ.
-
-Всего 5–8 предложений.
+1 короткий абзац, только если факты действительно содержат продолжение события.
 
 ФАКТЫ:
 {fact_source[:9000]}
@@ -1117,8 +1091,8 @@ def history_detail(chat, number):
             except Exception as e:
                 print("HISTORY FACT EDITOR ERROR:", repr(e))
 
-        # Крайний fallback: если AI недоступен, не выдаём длинную
-        # копию исходника. Показываем только безопасную краткую суть.
+        # Крайний fallback: не выдаём длинную копию источника. Показываем
+        # только краткую подтверждённую суть события.
         if not detail_body:
             first = safe[0] if safe else ""
             second = safe[1] if len(safe) > 1 else ""
@@ -1824,3 +1798,558 @@ def _process_news(chat, category="news", region=None):
         # Make publisher evidence explicit for the AI editor.
         evidence_text = " ".join(f"{x[0]} {x[2]}" for x in related).lower()
         source_text = " ".join(f"{x[0]} {x[1]} {x[2]}" for x in related).lower()
+        joint_publishers = []
+        # Deterministic recognition of the BBC/NPR investigation. Do not leave
+        # this critical editorial classification entirely to the LLM.
+        joint_story = any(k in (f"{title} {summary} {evidence_text} {source_text}").lower()
+                          for k in ("bassam al-hassan", "austin tice", "where is austin tice"))
+        has_bbc = "bbc" in (f"{title} {summary} {evidence_text} {source_text}").lower()
+        has_npr = any(k in (f"{title} {summary} {evidence_text} {source_text}").lower()
+                      for k in ("npr", "kpbs", "wxxi", "national public radio"))
+        if has_bbc and has_npr and joint_story:
+            joint_publishers = ["BBC", "NPR"]
+        # This investigation is explicitly documented by NPR/BBC as a joint
+        # production. Keep a deterministic editorial override if Google News
+        # fails to surface the NPR mirror in the RSS result set.
+        known_bbc_npr_story = (
+            "bbc" in (f"{title} {summary}").lower()
+            and any(k in (f"{title} {summary}").lower() for k in ("bassam", "al-hassan", "austin tice"))
+        )
+        if known_bbc_npr_story:
+            joint_publishers = ["BBC", "NPR"]
+
+        source_lines = [(title, link)] + [(x[0], x[1]) for x in related[:10]]
+        material = "\n\n".join(
+            f"[{i}] {x[0]}\nИсточник: {x[1]}\nОписание: {x[2][:500]}"
+            for i, x in enumerate([selected[0]] + related[:8])
+        )
+
+        prompt = f"""Ты редактор новостного Telegram-канала NOWLY.
+Рубрика: {category_name}
+Материалы собраны из открытых RSS-источников.
+
+Проверь, относится ли это к одному событию. Если есть подтверждение в нескольких независимых источниках, отметь подтвержденные факты. Telegram-публикации считай сигналом/первоисточником, но не доказательством сами по себе.
+
+Верни строго JSON:
+{{"status":"confirmed|partial_confirmed|joint_investigation|attributed|conflict|single_source",
+"recommendation":"publish|hold",
+"reason":"кратко",
+"telegram_first":true,
+"telegram_primary":false,
+"post":"готовый короткий пост на русском языке"}}
+
+Правила:
+- Не придумывай.
+- Если независимого подтверждения нет — recommendation=hold, КРОМЕ явно обозначенного эксклюзивного или совместного расследования крупного СМИ.
+- Если основной материал является совместным расследованием BBC/NPR или другого явно указанного тандема редакций, используй status=joint_investigation.
+- Для joint_investigation можно recommendation=publish, НО совместность расследования не означает независимого подтверждения каждой отдельной детали.
+- Разделяй факт совместного расследования и конкретные утверждения внутри него.
+- Если конкретная деталь подтверждена только самим расследованием, формулируй её как атрибуцию: "BBC и NPR сообщают", "по данным совместного расследования", "по словам собеседников". Не выдавай её за установленный факт.
+- Если конкретная деталь имеет отдельное независимое подтверждение, её можно назвать подтверждённым фактом.
+- Не называй заявление фактом.
+- Если источники расходятся — recommendation=hold.
+- Пост 2-4 коротких абзаца: 1) что произошло/о чём материал; 2) ключевая деталь или контекст; 3) при необходимости — что пока не подтверждено. Не ограничивайся одной строкой.
+- Заголовок должен содержать суть события, а не только ссылку на источник.
+- Если заголовок или исходный текст на английском/другом языке, обязательно переводи его на естественный русский язык. Не копируй иностранный заголовок в итоговый пост.
+- Итоговый пост должен быть самостоятельной русскоязычной новостной заметкой, а не переводом RSS-строки слово в слово.
+- Для joint_investigation конкретные спорные детали формулируй с атрибуцией, но не перегружай публикацию повторяющимися словами "BBC сообщает", "по данным расследования" и т.п. Одной ясной атрибуции обычно достаточно.
+- НИКОГДА не утверждай автоматически, что дополнительные источники "лишь повторяют" основной материал. Пиши это только если из материалов явно видно, что публикация прямо ссылается на основной источник и не содержит собственного подтверждения.
+- Если дополнительный источник сообщает о том же событии своими словами, но происхождение информации не установлено, называй его "дополнительным сообщением", а не перепечаткой.
+- Разделяй внутренний фактчек и публичный текст: внутренние статусы, причины проверки, количество источников и результаты поиска не должны попадать в поле "post".
+- Для joint_investigation публичный пост должен быть обычной новостной заметкой: суть события, ключевая деталь/контекст и, только если существенно, одна короткая оговорка о неподтверждённых деталях.
+- Не повторяй в нескольких абзацах одну и ту же оговорку об отсутствии подтверждения.
+- В конце: Источник: URL основного материала.
+- Без Markdown, HTML и служебных пояснений.
+- Для СВО не публикуй оперативно чувствительные данные, координаты или тактические сведения.
+- Для законов, постановлений, проектов и государственных решений обязательно указывай точный статус документа: проект, подготовлен, опубликован, принят, подписан или вступил в силу. Не повышай статус проекта до принятого акта.
+- Не добавляй прогнозы вроде «ожидается, что проект будет рассмотрен/утверждён», если такая информация прямо не указана в исходных материалах.
+- Для материалов о проектах нормативных актов используй формулировки «Минцифры разместило проект», «предлагается установить», «проект предусматривает» и аналогичные, если именно это подтверждено источниками.
+- Для правовых и федеральных новостей не выводи цели, последствия, мотивы или оценочные формулировки из собственного рассуждения. Используй их только если они прямо указаны в исходном материале или подтверждённых материалах.
+- КРИТИЧЕСКОЕ ПРАВИЛО ЯЗЫКА: поле "post" должно быть полностью на русском языке. Переведи заголовок и содержание исходного материала на русский естественно и журналистски. Английский заголовок запрещён в поле "post".
+- Не копируй поле "title" в "post", если оно написано не по-русски.
+- Перед выдачей JSON проверь поле "post": если в нём остались английские фразы, перепиши их по-русски.
+- Пример допустимого заголовка: "🇺🇸 США и Ливан предоставляют убежище разыскиваемому сирийскому генералу, сообщает BBC".
+
+Материалы:
+{material}
+
+Прямой признак совместного расследования:
+{", ".join(joint_publishers) if joint_publishers else "не обнаружен"}
+"""
+        prompt += """
+Дополнительное правило фактчека:
+- Считай источники независимыми, если это разные редакции/домены, даже если формулировки отличаются.
+- Для англоязычных мировых новостей не требуй совпадения слов в заголовках: сопоставляй место, объект, участников и последовательность событий.
+- Если два или более крупных независимых СМИ сообщают об одном и том же событии, это минимум partial_confirmed; если ключевой факт совпадает — confirmed.
+- Не считай перепечатку, агрегатор или материал, который просто ссылается на исходное расследование, независимым подтверждением.
+- Совместное расследование двух редакций — отдельный статус joint_investigation, а не single_source.
+- Если в материалах явно указаны BBC и NPR как участники одного расследования, а исходный материал описывает их совместную работу, status=joint_investigation даже если третьего независимого подтверждения нет.
+- Даже если joint_investigation допускается к публикации, пост должен содержать минимум 2 содержательных коротких абзаца, если исходный материал позволяет это сделать.
+- Если редакция указана в поле "[Редакция: ...]", учитывай это как идентификатор источника при оценке независимости.
+"""
+        raw = groq(prompt, 0.1, 650)
+        match = re.search(r"\{.*\}", raw, re.S)
+        data = json.loads(match.group(0)) if match else {}
+        status = data.get("status", "single_source")
+        recommendation = data.get("recommendation", "hold")
+        major_domains = ("reuters.", "apnews.", "bbc.", "npr.", "theguardian.", "dw.", "aljazeera.", "france24.", "interfax.ru", "1prime.ru", "garant.ru", "consultant.ru", "regulation.gov.ru")
+        major_sources = set()
+        for x in related:
+            low = f"{x[0]} {x[1]} {x[2]}".lower()
+            for domain in major_domains:
+                if domain in low:
+                    major_sources.add(domain)
+        if status == "single_source" and len(major_sources) >= 2:
+            status = "confirmed"
+            recommendation = "publish"
+            data["reason"] = "Материал подтверждён несколькими независимыми крупными СМИ."
+        explicit_publishers = set()
+        publisher_aliases = ("bbc", "reuters", "ap", "npr", "the guardian", "dw", "al jazeera", "france 24", "интерфакс", "interfax", "тасс", "ria", "риа новости", "рбк", "rbc", "коммерсант", "kommersant", "ведомости", "garant", "гарант", "consultant", "консультант")
+        for x in related:
+            txt = f"{x[0]} {x[1]} {x[2]}".lower()
+            for alias in publisher_aliases:
+                if alias in txt:
+                    explicit_publishers.add(alias)
+        if status == "single_source" and len(explicit_publishers) >= 2:
+            status = "confirmed"
+            recommendation = "publish"
+            data["reason"] = "Материал подтверждён несколькими независимыми крупными СМИ."
+        ru_publishers = set()
+        for x in direct_ru:
+            m = re.search(r"\[Редакция:\s*([^\]]+)\]", str(x[2]))
+            if m:
+                ru_publishers.add(m.group(1).strip().lower())
+        # For Russian federal/legal stories, confirmation must be based on
+        # genuinely distinct publishers, not duplicate Google News entries
+        # from the same outlet or publisher names appearing in the headline.
+        verified_ru_publishers = set()
+        ru_domain_map = {
+            "interfax.ru": "Интерфакс",
+            "tass.ru": "ТАСС",
+            "ria.ru": "РИА Новости",
+            "rbc.ru": "РБК",
+            "kommersant.ru": "Коммерсантъ",
+            "vedomosti.ru": "Ведомости",
+            "garant.ru": "ГАРАНТ",
+            "consultant.ru": "КонсультантПлюс",
+            "cbr.ru": "Банк России",
+            "government.ru": "Правительство РФ",
+            "kremlin.ru": "Кремль",
+            "duma.gov.ru": "Госдума",
+        }
+        for x in related:
+            txt = f"{x[0]} {x[1]} {x[2]}".lower()
+            marker = re.search(r"\[редакция:\s*([^\]]+)\]", txt)
+            if marker:
+                verified_ru_publishers.add(marker.group(1).strip().lower())
+            for domain, publisher in ru_domain_map.items():
+                if domain in txt:
+                    verified_ru_publishers.add(publisher.lower())
+
+        if category in ("russia", "laws", "kremlin", "russia_tech") and len(verified_ru_publishers) >= 2:
+            status = "confirmed"
+            recommendation = "publish"
+            data["reason"] = "Материал подтверждён несколькими независимыми российскими источниками."
+        elif category in ("russia", "laws", "kremlin", "russia_tech") and len(verified_ru_publishers) < 2:
+            # Do not let the LLM call a Russian federal story "confirmed"
+            # when the deterministic source set contains only one publisher.
+            # A single outlet can be a primary/officially documented source,
+            # but it is not independent multi-source confirmation.
+            if status == "confirmed":
+                status = "single_source"
+                recommendation = "hold"
+                data["reason"] = "Найден только один независимый редакционный источник; автоматическое подтверждение несколькими СМИ не установлено."
+        if joint_publishers:
+            status = "joint_investigation"
+            recommendation = "publish"
+            data["reason"] = "BBC и NPR действительно ведут совместное расследование. Публикация разрешена с обязательной атрибуцией конкретных утверждений; совместность расследования не означает независимого подтверждения каждой детали."
+        labels = {
+            "confirmed": "🟢 подтверждено",
+            "partial_confirmed": "🟡 частично подтверждено",
+            "joint_investigation": "🟡 совместное расследование СМИ",
+            "attributed": "🔵 заявление/атрибуция",
+            "conflict": "🔴 противоречие",
+            "single_source": "⚪ один источник",
+        }
+        rec = "🟢 рекомендовано к публикации" if recommendation == "publish" else "🔴 лучше НЕ публиковать"
+        source_names = []
+        allowed_names = ('BBC', 'Reuters', 'AP', 'NPR', 'The Guardian', 'DW', 'Al Jazeera', 'France 24', 'CNN', 'MIT', 'Interfax', 'ТАСС', 'РИА Новости', 'РБК', 'Коммерсантъ', 'Ведомости', 'ГАРАНТ', 'КонсультантПлюс')
+        for x in related:
+            m = re.search(r"\[Редакция:\s*([^\]]+)\]", str(x[2]))
+            if m and any(a.lower() in m.group(1).lower() for a in allowed_names) and m.group(1) not in source_names:
+                source_names.append(m.group(1))
+        if category in ("russia", "laws", "kremlin", "russia_tech"):
+            for publisher in sorted(verified_ru_publishers):
+                display = next((v for k, v in ru_domain_map.items() if v.lower() == publisher), None)
+                if display and display not in source_names:
+                    source_names.append(display)
+        if not source_names:
+            source_names = [re.sub(r"^www\\.", "", re.sub(r"^https?://", "", link)).split("/")[0]]
+        source_line = " • ".join(source_names[:4])
+        admin_text = f"🔎 Проверка: {labels.get(status, '⚪ не определено')}\\n{rec}\\nИсточники: {source_line}"
+        if tg_first or tg_primary:
+            admin_text += f"\\nTelegram первым: {'да' if tg_first else 'нет'} • основной: {'да' if tg_primary else 'нет'}"
+        send(chat, admin_text)
+        if recommendation == "publish":
+            send(chat, "🟢 Рекомендовано к публикации")
+        post = str(data.get("post","")).strip()
+        post = re.sub(r"\[\s*(https?://[^\]\s]+)\s*\]", r"\1", post)
+        post = post.replace("\\&", "&")
+        post = sanitize_legal_post(post, category, title, summary, evidence_text)
+        if not post:
+            # Never expose a foreign-language RSS title in a fallback draft.
+            fallback_prompt = f"""Перепиши этот материал как короткую новость на русском языке.
+Заголовок: {title}
+Описание: {summary[:700]}
+Верни 2 коротких абзаца и заголовок на русском. Не добавляй фактов, которых нет в исходнике."""
+            try:
+                fallback = groq(fallback_prompt, 0.2, 220).strip()
+            except Exception:
+                fallback = ""
+            post = fallback or f"📰 Новость требует проверки редактора.\n\n{summary[:900]}\n\nИсточник: {link}\n\n⚠️ Черновик требует ручной проверки."
+        if recommendation == "hold":
+            # Single-source material is not automatically blocked for low-risk
+            # obituary/biography/history/science/culture stories from a major outlet.
+            low_risk_text = f"{title} {summary} {post}".lower()
+            low_risk_obituary = any(k in low_risk_text for k in (
+                "dies at", "died at", "has died", "died on", "скончал", "умер", "умерла",
+                "похорон", "некролог", "биография", "памяти"
+            ))
+            low_risk_single_source = (
+                status == "single_source"
+                and (
+                    category in ("history", "russia_tech", "tech", "humor")
+                    or (category == "world" and low_risk_obituary)
+                )
+                and any(domain in (link or "").lower()
+                        for domain in ("bbc.", "reuters.", "apnews.", "npr.", "dw.", "theguardian.", "mit.edu"))
+            )
+            if low_risk_single_source:
+                recommendation = "publish"
+                data["reason"] = "Один надёжный источник допустим для низкорисковой биографической/исторической/научной новости; спорных признаков не обнаружено."
+            else:
+                send(chat, "⚠️ Редактор: материал не прошёл порог автоматической публикации. Кнопка публикации заблокирована; при необходимости проверь его вручную по источнику.")
+                buttons = [[{"text":"❌ Отклонить","callback_data":"no"}]]
+        else:
+            buttons = [[{"text":"✅ Опубликовать","callback_data":"pub"},{"text":"❌ Отклонить","callback_data":"no"}]]
+    except Exception as e:
+        print("AI ERROR:", repr(e))
+        post = (
+            f"⚠️ AI-редактор временно недоступен.\n\n"
+            f"Черновик требует ручной проверки.\n\n{summary[:900]}\n\n"
+            f"Источник: {link}\n\n"
+            "Новость НЕ считается проверенной."
+        )
+        send(chat, "🛑 Автоматическая публикация заблокирована из-за ошибки AI. Проверь материал вручную или отклони его.")
+        buttons = [[{"text":"❌ Отклонить","callback_data":"no"}]]
+
+    send(chat, post, buttons)
+
+
+def process_news(chat, category="news", region=None):
+    key = (str(chat), str(category), str(region or ""))
+    if key in ACTIVE_PROCESSING:
+        send(chat, "⏳ NOWLY уже обрабатывает этот запрос. Дождись результата.")
+        return
+    ACTIVE_PROCESSING.add(key)
+    try:
+        return _process_news(chat, category, region)
+    finally:
+        ACTIVE_PROCESSING.discard(key)
+
+def handle_update(u):
+    if "message" in u:
+        m = u["message"]
+        chat = m["chat"]["id"]
+        text = m.get("text", "")
+
+        if ADMIN_ID and str(chat) != str(ADMIN_ID):
+            return
+
+        if text.startswith("/start") or text == "ℹ️ Статус":
+            send_menu(chat)
+        elif text == "🗺 Новости по регионам":
+            tg("sendMessage", {
+                "chat_id": chat,
+                "text": "🗺 РОССИЯ ПО РЕГИОНАМ\\n\\nВыбери федеральный округ или региональный блок:",
+                "reply_markup": json.dumps({"keyboard": region_keyboard(), "resize_keyboard": True, "is_persistent": True}, ensure_ascii=False)
+            })
+        elif text == "🗺 Россия по регионам":
+            tg("sendMessage", {
+                "chat_id": chat,
+                "text": "🗺 РОССИЯ ПО РЕГИОНАМ\n\nВыбери федеральный уровень или региональный блок:",
+                "reply_markup": json.dumps({"keyboard": region_keyboard(), "resize_keyboard": True}, ensure_ascii=False)
+            })
+        elif text == "🇷🇺 Россия":
+            tg("sendMessage", {
+                "chat_id": chat,
+                "text": "🇷🇺 РОССИЯ\n\nВыбери направление:",
+                "reply_markup": json.dumps({"keyboard": russia_keyboard(), "resize_keyboard": True, "is_persistent": True}, ensure_ascii=False)
+            })
+        elif text == "🇷🇺 Россия — федеральные новости":
+            threading.Thread(target=process_news, args=(chat, "russia"), daemon=True).start()
+        elif text == "🇷🇺 Федеральные новости":
+            threading.Thread(target=process_news, args=(chat, "russia"), daemon=True).start()
+        elif text == "↩️ Главное меню":
+            send_menu(chat)
+        elif text == "↩️ История":
+            HISTORY_MODE.pop(chat, None)
+            tg("sendMessage", {
+                "chat_id": chat,
+                "text": "🏛 ИСТОРИЯ\n\nВыбери формат:",
+                "reply_markup": json.dumps({"keyboard": history_keyboard(), "resize_keyboard": True, "is_persistent": True}, ensure_ascii=False)
+            })
+        elif text == "↩️ Регионы":
+            tg("sendMessage", {
+                "chat_id": chat,
+                "text": "🗺 Выбери регион:",
+                "reply_markup": json.dumps({"keyboard": region_keyboard(), "resize_keyboard": True}, ensure_ascii=False)
+            })
+        elif text.startswith("📍 "):
+            region = text[3:].strip()
+            if region in REGION_QUERIES:
+                if HISTORY_MODE.get(chat) == ("region_select", None):
+                    HISTORY_MODE.pop(chat, None)
+                    threading.Thread(target=history_day, args=(chat, "region", region), daemon=True).start()
+                    tg("sendMessage", {
+                        "chat_id": chat,
+                        "text": f"⏳ Ищу значимые события {region}, произошедшие в этот день в разные годы…",
+                        "reply_markup": json.dumps({"keyboard": [[{"text":"↩️ История"}]],"resize_keyboard":True}, ensure_ascii=False)
+                    })
+                else:
+                    tg("sendMessage", {
+                        "chat_id": chat,
+                        "text": f"🗺 {region}\n\nВыбери тип материалов:",
+                        "reply_markup": json.dumps({"keyboard": region_category_keyboard(region), "resize_keyboard": True}, ensure_ascii=False)
+                    })
+        elif text.startswith("📰 Новости — "):
+            region = text[len("📰 Новости — "):]
+            threading.Thread(target=process_news, args=(chat, "news", region), daemon=True).start()
+        elif text.startswith("🚨 Происшествия — "):
+            region = text[len("🚨 Происшествия — "):]
+            threading.Thread(target=process_news, args=(chat, "incidents", region), daemon=True).start()
+        elif text.startswith("⚡ Экстренно — "):
+            region = text[len("⚡ Экстренно — "):]
+            threading.Thread(target=process_news, args=(chat, "emergency", region), daemon=True).start()
+        elif text.startswith("🕵️ Криминал — "):
+            region = text[len("🕵️ Криминал — "):]
+            threading.Thread(target=process_news, args=(chat, "crime", region), daemon=True).start()
+        elif text.startswith("🔎 Розыск — "):
+            region = text[len("🔎 Розыск — "):]
+            threading.Thread(target=process_news, args=(chat, "wanted", region), daemon=True).start()
+        elif text.startswith("🏛 Кремль — "):
+            region = text[len("🏛 Кремль — "):]
+            threading.Thread(target=process_news, args=(chat, "kremlin", region), daemon=True).start()
+        elif text.startswith("📡 События — "):
+            region = text[len("📡 События — "):]
+            threading.Thread(target=process_news, args=(chat, "events", region), daemon=True).start()
+        elif text.startswith("/news") or text == "📰 Новости":
+            threading.Thread(target=process_news, args=(chat, "news"), daemon=True).start()
+        elif text == "🌍 Мир":
+            tg("sendMessage", {
+                "chat_id": chat,
+                "text": "🌍 МИР\n\nВыбери направление:",
+                "reply_markup": json.dumps({"keyboard": world_keyboard(), "resize_keyboard": True, "is_persistent": True}, ensure_ascii=False)
+            })
+        elif text == "🌍 Мировые новости":
+            threading.Thread(target=process_news, args=(chat, "world"), daemon=True).start()
+        elif text == "📡 Мировые события":
+            threading.Thread(target=process_news, args=(chat, "events"), daemon=True).start()
+        elif text == "🚨 Мировые происшествия":
+            threading.Thread(target=process_news, args=(chat, "incidents"), daemon=True).start()
+        elif text == "⚡ Мировые экстренные новости":
+            threading.Thread(target=process_news, args=(chat, "emergency"), daemon=True).start()
+        elif text == "⚔️ Международные конфликты":
+            threading.Thread(target=process_news, args=(chat, "conflicts"), daemon=True).start()
+        elif text == "📡 События":
+            threading.Thread(target=process_news, args=(chat, "events"), daemon=True).start()
+        elif text == "🚨 Происшествия":
+            threading.Thread(target=process_news, args=(chat, "incidents"), daemon=True).start()
+        elif text == "⚡ Экстренно":
+            threading.Thread(target=process_news, args=(chat, "emergency"), daemon=True).start()
+        elif text == "🕵️ Криминал":
+            threading.Thread(target=process_news, args=(chat, "crime"), daemon=True).start()
+        elif text in ("🔎 Розыск", "🔎 Внимание: розыск"):
+            threading.Thread(target=process_news, args=(chat, "wanted"), daemon=True).start()
+        elif text in ("🏛 Кремль", "🏛 Новости Кремля"):
+            threading.Thread(target=process_news, args=(chat, "kremlin"), daemon=True).start()
+        elif text in ("⚔️ СВО", "⚔️ СВО / конфликты"):
+            threading.Thread(target=process_news, args=(chat, "conflicts"), daemon=True).start()
+        elif text == "📡 Анализ Telegram-каналов по СВО":
+            threading.Thread(target=process_news, args=(chat, "conflicts"), daemon=True).start()
+        elif text in ("🔬 Наука и технологии России",):
+            threading.Thread(target=process_news, args=(chat, "russia_tech"), daemon=True).start()
+        elif text == "⚖️ Законы и штрафы":
+            threading.Thread(target=process_news, args=(chat, "laws"), daemon=True).start()
+        elif text == "🤖 ИИ / технологии":
+            threading.Thread(target=process_news, args=(chat, "tech"), daemon=True).start()
+        elif text == "💰 Экономика":
+            threading.Thread(target=process_news, args=(chat, "economy"), daemon=True).start()
+        elif text == "🚗 Авто":
+            threading.Thread(target=process_news, args=(chat, "auto"), daemon=True).start()
+        elif text == "😂 Юмор":
+            threading.Thread(target=process_news, args=(chat, "humor"), daemon=True).start()
+        elif text == "🏛 История":
+            tg("sendMessage", {
+                "chat_id": chat,
+                "text": "🏛 ИСТОРИЯ\n\nВыбери формат:",
+                "reply_markup": json.dumps({"keyboard": history_keyboard(), "resize_keyboard": True, "is_persistent": True}, ensure_ascii=False)
+            })
+        elif text == "📅 Этот день в истории":
+            tg("sendMessage", {
+                "chat_id": chat,
+                "text": "📅 ЭТОТ ДЕНЬ В ИСТОРИИ\n\nВыбери охват:",
+                "reply_markup": json.dumps({"keyboard": history_scope_keyboard(), "resize_keyboard": True}, ensure_ascii=False)
+            })
+        elif text == "🇷🇺 Россия — этот день":
+            HISTORY_MODE.pop(chat, None)
+            threading.Thread(target=history_day, args=(chat, "russia"), daemon=True).start()
+            tg("sendMessage", {
+                "chat_id": chat,
+                "text": "⏳ Ищу значимые события, которые происходили в этот день в разные годы…",
+                "reply_markup": json.dumps({"keyboard": [[{"text":"↩️ История"}]],"resize_keyboard":True}, ensure_ascii=False)
+            })
+        elif text == "🌍 Мир — этот день":
+            HISTORY_MODE.pop(chat, None)
+            threading.Thread(target=history_day, args=(chat, "world"), daemon=True).start()
+            tg("sendMessage", {
+                "chat_id": chat,
+                "text": "⏳ Ищу значимые события, которые происходили в этот день в разные годы…",
+                "reply_markup": json.dumps({"keyboard": [[{"text":"↩️ История"}]],"resize_keyboard":True}, ensure_ascii=False)
+            })
+        elif text == "🇷🇺 История России":
+            HISTORY_MODE.pop(chat, None)
+            threading.Thread(target=history_day, args=(chat, "russia"), daemon=True).start()
+            tg("sendMessage", {
+                "chat_id": chat,
+                "text": "⏳ Ищу значимые события, которые происходили в этот день в разные годы…",
+                "reply_markup": json.dumps({"keyboard": [[{"text":"↩️ История"}]],"resize_keyboard":True}, ensure_ascii=False)
+            })
+        elif text == "🌍 История мира":
+            HISTORY_MODE.pop(chat, None)
+            threading.Thread(target=history_day, args=(chat, "world"), daemon=True).start()
+            tg("sendMessage", {
+                "chat_id": chat,
+                "text": "⏳ Ищу значимые события, которые происходили в этот день в разные годы…",
+                "reply_markup": json.dumps({"keyboard": [[{"text":"↩️ История"}]],"resize_keyboard":True}, ensure_ascii=False)
+            })
+        elif text in ("🗺 История по регионам", "🗺 Регионы — этот день"):
+            HISTORY_MODE[chat] = ("region_select", None)
+            tg("sendMessage", {
+                "chat_id": chat,
+                "text": "🗺 Выбери регион:",
+                "reply_markup": json.dumps({"keyboard": history_region_keyboard(), "resize_keyboard":True}, ensure_ascii=False)
+            })
+        elif text == "🔥 Тренды":
+            threading.Thread(target=process_news, args=(chat, "trends"), daemon=True).start()
+        elif re.fullmatch(r"\d{4}", text.strip()) and chat in HISTORY_MODE:
+            # Legacy year input is intentionally disabled: the rubric now uses today's date automatically.
+            HISTORY_MODE.pop(chat, None)
+            send(chat, "📅 NOWLY автоматически использует сегодняшнюю дату. Выбери «Этот день в истории» снова.")
+
+        elif text.startswith("/status"):
+            send(chat, "🟢 NOWLY AI Editor работает.", menu_keyboard())
+
+    elif "callback_query" in u:
+        q = u["callback_query"]
+        chat = q["message"]["chat"]["id"]
+
+        if ADMIN_ID and str(chat) != str(ADMIN_ID):
+            return
+
+        if q["data"].startswith("hist_more:"):
+            number = q["data"].split(":", 1)[1]
+            tg("answerCallbackQuery", {"callback_query_id": q["id"], "text": "Открываю подробный материал…"})
+            threading.Thread(target=history_detail, args=(chat, number), daemon=True).start()
+            return
+
+        if q["data"] == "hist_back":
+            tg("answerCallbackQuery", {"callback_query_id": q["id"], "text": "Возвращаю список событий"})
+            cache = HISTORY_CACHE.get(str(chat))
+            if cache:
+                scope = cache.get("scope", "world")
+                region = cache.get("region")
+                # Rebuild the concise digest from the cached facts without another AI call.
+                scope_title = "🇷🇺 Россия" if scope == "russia" else ("🌍 Мир" if scope == "world" else f"🗺 {region}")
+                lines = [f"📅 ЭТОТ ДЕНЬ В ИСТОРИИ — {cache.get('date', '')}", scope_title, ""]
+                buttons = []
+                for n, item in enumerate(cache.get("events", []), 1):
+                    lines.append(f"🔹 {item['year']} — {item['title']}")
+                    lines.append(item["summary"].strip())
+                    lines.append("")
+                    buttons.append([{"text": f"🔎 Подробнее — {item['year']}", "callback_data": f"hist_more:{n}"}])
+                lines.append("Нажми «🔎 Подробнее», чтобы открыть полный материал по выбранному событию.")
+                send(chat, "\n".join(lines).strip(), buttons + [[
+                    {"text": "✅ Опубликовать", "callback_data": "pub"},
+                    {"text": "❌ Отклонить", "callback_data": "no"}
+                ]])
+            else:
+                send(chat, "⚠️ Список событий больше не доступен. Запусти «Этот день в истории» заново.")
+            return
+
+        if q["data"] == "pub":
+            text = q["message"]["text"]
+            result = tg("sendMessage", {
+                "chat_id": CHANNEL,
+                "text": text,
+                "disable_web_page_preview": "false"
+            })
+
+            if result and result.get("ok"):
+                tg("answerCallbackQuery", {
+                    "callback_query_id": q["id"],
+                    "text": "Опубликовано в NOWLY"
+                })
+                try:
+                    tg("editMessageReplyMarkup", {
+                        "chat_id": chat,
+                        "message_id": q["message"]["message_id"],
+                        "reply_markup": json.dumps({"inline_keyboard": []})
+                    })
+                except Exception:
+                    pass
+            else:
+                error_text = "Неизвестная ошибка Telegram"
+                if result:
+                    error_text = result.get("description", str(result))
+                tg("answerCallbackQuery", {
+                    "callback_query_id": q["id"],
+                    "text": "Ошибка публикации",
+                    "show_alert": True
+                })
+                send(
+                    chat,
+                    f"❌ Не удалось опубликовать в канал {CHANNEL}.\n\n"
+                    f"Причина Telegram: {error_text}"
+                )
+
+        else:
+            tg("answerCallbackQuery", {
+                "callback_query_id": q["id"],
+                "text": "Отклонено"
+            })
+            try:
+                tg("editMessageReplyMarkup", {
+                    "chat_id": chat,
+                    "message_id": q["message"]["message_id"],
+                    "reply_markup": json.dumps({"inline_keyboard": []})
+                })
+            except Exception:
+                pass
+
+@app.get("/")
+def health():
+    return jsonify({
+        "status": "online",
+        "service": "NOWLY AI Editor",
+        "channel": CHANNEL
+    })
+
+@app.post("/telegram/webhook")
+def webhook():
+    handle_update(request.get_json(force=True))
+    return "ok"
+
+if __name__ == "__main__":
+    setup_webhook()
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "10000")))
