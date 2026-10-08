@@ -939,13 +939,20 @@ def history_detail(chat, number):
         if len(out_norm) >= 180 and out_norm in src_norm:
             return False
 
-        # Отбрасываем редактуру, которая слишком близка к исходнику.
-        src_words = set(re.findall(r"[а-яёa-z]{4,}", src_norm))
-        out_words = set(re.findall(r"[а-яёa-z]{4,}", out_norm))
-        if len(out_words) >= 25:
-            similarity = len(src_words & out_words) / max(len(out_words), 1)
-            if similarity > 0.82:
-                return False
+        # Проверяем именно последовательное копирование, а не общий словарь.
+        # Для исторического текста высокий общий overlap естественен: имена,
+        # названия объектов и термины неизбежно повторяются.
+        src_tokens = re.findall(r"[а-яёa-z0-9-]{3,}", src_norm)
+        out_tokens = re.findall(r"[а-яёa-z0-9-]{3,}", out_norm)
+        if len(out_tokens) >= 12:
+            copied_phrases = set()
+            for n in (7, 8):
+                for i in range(len(src_tokens) - n + 1):
+                    copied_phrases.add(" ".join(src_tokens[i:i + n]))
+            for i in range(len(out_tokens) - 7 + 1):
+                phrase = " ".join(out_tokens[i:i + 7])
+                if phrase in copied_phrases:
+                    return False
 
         # AI может вернуть весь текст одним абзацем. Это не ошибка:
         # reflow_editorial() ниже сам разобьёт его по предложениям.
