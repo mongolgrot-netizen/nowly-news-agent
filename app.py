@@ -471,7 +471,7 @@ def history_day(chat, scope="world", region=None):
 1. Используй только события, которые произошли именно {date_label} в разные годы.
 2. Не требуй от пользователя вводить год.
 3. Для России и регионов соблюдай строгую географическую принадлежность. Не включай Кыргызстан, Югославию, Великобританию и другие страны только потому, что событие интересное.
-4. Выбери 8–12 действительно значимых событий из разных эпох, если источники позволяют. Для каждого события дай достаточно подробный рассказ, чтобы читатель понял не только факт, но и его исторический контекст.
+4. Выбери 6–10 действительно значимых событий из разных эпох. Если для выбранного охвата подтвержденных событий меньше — лучше показать меньше, чем заполнить список нерелевантными фактами.
 5. Для каждого события дай: год, что произошло, контекст/причину если она подтверждена, ключевых участников и последствия/значение.
 6. Не выдумывай подробности. Если источник дает только факт, не добавляй неподтвержденные причины.
 7. Не включай обычные дни рождения/смерти как события.
@@ -497,7 +497,7 @@ Wikimedia / Wikipedia: ссылки календарных материалов
 {json.dumps(enriched,ensure_ascii=False)[:42000]}
 """
     try:
-        post=groq(prompt,0.2,2600).strip()
+        post=groq(prompt,0.2,2200).strip()
         if not post: raise ValueError("empty")
     except Exception as ex:
         print("HISTORY AI:",repr(ex))
@@ -507,24 +507,26 @@ Wikimedia / Wikipedia: ссылки календарных материалов
         send(chat, "⚠️ Исторический материал собран без AI-редактора. Автоматическая публикация заблокирована: сначала проверь факты вручную.")
         send(chat,post,[[{"text":"❌ Отклонить","callback_data":"no"}]])
         return
-    # Telegram ограничивает одно сообщение примерно 4096 символами.
-    # Длинный исторический материал отправляем частями, но кнопки публикации
-    # ставим только на последнюю часть, чтобы публикация не создавала обрыв.
-    chunks=[]
-    rest=post
-    while len(rest)>3900:
-        cut=rest.rfind("\n\n",0,3900)
-        if cut<1800: cut=rest.rfind("\n",0,3900)
-        if cut<1: cut=3900
+    # Telegram: безопасно разбиваем длинный материал на сообщения до 3900 символов.
+    chunks = []
+    rest = post
+    while len(rest) > 3900:
+        cut = rest.rfind("\n\n", 0, 3900)
+        if cut < 1800:
+            cut = rest.rfind("\n", 0, 3900)
+        if cut < 1:
+            cut = 3900
         chunks.append(rest[:cut].strip())
-        rest=rest[cut:].strip()
-    if rest: chunks.append(rest)
-    if len(chunks)==1:
-        send(chat,chunks[0],[[{"text":"✅ Опубликовать","callback_data":"pub"},{"text":"❌ Отклонить","callback_data":"no"}]])
+        rest = rest[cut:].strip()
+    if rest:
+        chunks.append(rest)
+
+    if len(chunks) == 1:
+        send(chat, chunks[0], [[{"text":"✅ Опубликовать","callback_data":"pub"},{"text":"❌ Отклонить","callback_data":"no"}]])
     else:
         for part in chunks[:-1]:
-            send(chat,part)
-        send(chat,chunks[-1],[[{"text":"✅ Опубликовать","callback_data":"pub"},{"text":"❌ Отклонить","callback_data":"no"}]])
+            send(chat, part)
+        send(chat, chunks[-1], [[{"text":"✅ Опубликовать","callback_data":"pub"},{"text":"❌ Отклонить","callback_data":"no"}]])
 
 def world_keyboard():
     return [
@@ -830,7 +832,7 @@ def search_related_news(target, max_items=8):
         base_queries.insert(1, "проект постановления электронная почтовая система")
         base_queries.insert(2, "Минцифры проект постановления почтовая система")
     if legal_story:
-        publishers += [("interfax.ru","Interfax"),("1prime.ru","ПРАЙМ"),("garant.ru","ГАРАНТ"),("consultant.ru","КонсультантПлюс"),("regulation.gov.ru","regulation.gov.ru", "finmarket.ru")]
+        publishers += [("interfax.ru","Interfax"),("1prime.ru","ПРАЙМ"),("garant.ru","ГАРАНТ"),("consultant.ru","КонсультантПлюс"),("regulation.gov.ru","regulation.gov.ru")]
     if any(k in raw_text for k in ("банк россии", "системно значим", "правительств", "президент", "указ", "госдум", "государственная дума", "министерств", "ведомств")):
         publishers += [("cbr.ru","Банк России"),("government.ru","Правительство РФ"),("kremlin.ru","Кремль"),("duma.gov.ru","Госдума")]
     queries = []
@@ -1127,7 +1129,7 @@ def verify_russian_story_direct(target, category="russia"):
         ("Interfax", ("интерфакс","interfax")), ("ТАСС", ("тасс","tass")),
         ("РИА Новости", ("риа новости","ria")), ("РБК", ("рбк","rbc")),
         ("Коммерсантъ", ("коммерсант","kommersant")), ("Ведомости", ("ведомости","vedomosti")),
-        ("ГАРАНТ", ("гарант","garant")), ("КонсультантПлюс", ("консультант","consultant")),\n        ("Финмаркет", ("финмаркет","finmarket")),
+        ("ГАРАНТ", ("гарант","garant")), ("КонсультантПлюс", ("консультант","consultant")),
         ("Банк России", ("банк россии","cbr.ru","центральный банк")),
         ("Правительство РФ", ("правительство россии","government.ru","правительство")),
         ("Кремль", ("кремль","kremlin.ru","президент россии")),
@@ -1303,7 +1305,7 @@ def _process_news(chat, category="news", region=None):
             recommendation = "publish"
             data["reason"] = "Материал подтверждён несколькими независимыми крупными СМИ."
         explicit_publishers = set()
-        publisher_aliases = ("bbc", "reuters", "ap", "npr", "the guardian", "dw", "al jazeera", "france 24", "интерфакс", "interfax", "тасс", "ria", "риа новости", "рбк", "rbc", "коммерсант", "kommersant", "ведомости", "garant", "гарант", "consultant", "консультант", "финмаркет", "finmarket")
+        publisher_aliases = ("bbc", "reuters", "ap", "npr", "the guardian", "dw", "al jazeera", "france 24", "интерфакс", "interfax", "тасс", "ria", "риа новости", "рбк", "rbc", "коммерсант", "kommersant", "ведомости", "garant", "гарант", "consultant", "консультант")
         for x in related:
             txt = f"{x[0]} {x[1]} {x[2]}".lower()
             for alias in publisher_aliases:
@@ -1335,7 +1337,6 @@ def _process_news(chat, category="news", region=None):
             "government.ru": "Правительство РФ",
             "kremlin.ru": "Кремль",
             "duma.gov.ru": "Госдума",
-            "finmarket.ru": "Финмаркет",
         }
         for x in related:
             txt = f"{x[0]} {x[1]} {x[2]}".lower()
@@ -1373,7 +1374,7 @@ def _process_news(chat, category="news", region=None):
         }
         rec = "🟢 рекомендовано к публикации" if recommendation == "publish" else "🔴 лучше НЕ публиковать"
         source_names = []
-        allowed_names = ('BBC', 'Reuters', 'AP', 'NPR', 'The Guardian', 'DW', 'Al Jazeera', 'France 24', 'CNN', 'MIT', 'Interfax', 'ТАСС', 'РИА Новости', 'РБК', 'Коммерсантъ', 'Ведомости', 'ГАРАНТ', 'КонсультантПлюс', 'Финмаркет')
+        allowed_names = ('BBC', 'Reuters', 'AP', 'NPR', 'The Guardian', 'DW', 'Al Jazeera', 'France 24', 'CNN', 'MIT', 'Interfax', 'ТАСС', 'РИА Новости', 'РБК', 'Коммерсантъ', 'Ведомости', 'ГАРАНТ', 'КонсультантПлюс')
         for x in related:
             m = re.search(r"\[Редакция:\s*([^\]]+)\]", str(x[2]))
             if m and any(a.lower() in m.group(1).lower() for a in allowed_names) and m.group(1) not in source_names:
@@ -1406,18 +1407,7 @@ def _process_news(chat, category="news", region=None):
                 fallback = groq(fallback_prompt, 0.2, 220).strip()
             except Exception:
                 fallback = ""
-            # Safe deterministic fallback for confirmed federal/legal stories.
-            # Never expose a Google News redirect as the public source.
-            clean_summary = re.sub(r"<[^>]+>", " ", str(summary or "")).strip()
-            clean_summary = re.sub(r"\s+", " ", clean_summary)
-            if category in ("russia", "laws", "kremlin", "russia_tech"):
-                post = (
-                    f"{title}\n\n"
-                    f"{clean_summary[:900]}\n\n"
-                    f"Статус: проект документа."
-                ).strip()
-            else:
-                post = fallback or f"{title}\n\n{clean_summary[:900]}".strip()
+            post = fallback or f"📰 Новость требует проверки редактора.\n\n{summary[:900]}\n\nИсточник: {link}\n\n⚠️ Черновик требует ручной проверки."
         if recommendation == "hold":
             # Single-source material is not automatically blocked for low-risk
             # obituary/biography/history/science/culture stories from a major outlet.
