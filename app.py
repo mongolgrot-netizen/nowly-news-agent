@@ -970,34 +970,35 @@ def history_detail(chat, number):
         if not text:
             return text
 
-        text = re.sub(r"\\r\\n?", "\\n", text).strip()
-        text = re.sub(r"(?m)^\\s*(?:#+\\s*)?📌\\s*Что произошло\\s*$", "📌 Что произошло", text)
-        text = re.sub(r"(?m)^\\s*(?:#+\\s*)?📍\\s*Что было дальше\\s*$", "📍 Что было дальше", text)
+        text = re.sub(r"\r\n?", "\n", text).strip()
+        text = re.sub(r"(?m)^\s*(?:#+\s*)?📌\s*Что произошло\s*$", "📌 Что произошло", text)
+        text = re.sub(r"(?m)^\s*(?:#+\s*)?📍\s*Что было дальше\s*$", "📍 Что было дальше", text)
 
-        # Даже если модель вернула один длинный абзац, разбиваем его по
-        # предложениям. Содержание при этом не меняется.
-        sections = re.split(r"(?m)^📍 Что было дальше\\s*$", text, maxsplit=1)
+        sections = re.split(r"(?m)^📍 Что было дальше\s*$", text, maxsplit=1)
         main = sections[0].strip()
         later = sections[1].strip() if len(sections) > 1 else ""
 
-        def paragraphize(block, max_sentences=2):
-            lines = [x.strip() for x in block.split("\\n") if x.strip()]
+        def paragraphize(block):
+            lines = [x.strip() for x in block.split("\n") if x.strip()]
             heading = ""
             if lines and lines[0] == "📌 Что произошло":
                 heading = lines.pop(0)
+
             sentences = []
             for line in lines:
                 sentences.extend([
-                    s.strip() for s in re.split(r"(?<=[.!?])\\s+(?=[А-ЯЁA-Z0-9])", line)
+                    s.strip()
+                    for s in re.split(r"(?<=[.!?])\s+(?=[А-ЯЁA-Z0-9])", line)
                     if s.strip()
                 ])
+
             paras = []
-            for i in range(0, len(sentences), max_sentences):
-                paras.append(" ".join(sentences[i:i + max_sentences]))
+            for i in range(0, len(sentences), 2):
+                paras.append(" ".join(sentences[i:i + 2]))
             return heading, paras
 
         main_heading, main_paras = paragraphize(main)
-        later_heading, later_paras = paragraphize("📌 Что произошло\\n" + later) if later else ("", [])
+        _, later_paras = paragraphize("📌 Что произошло\n" + later) if later else ("", [])
 
         out = []
         if main_heading:
@@ -1006,7 +1007,7 @@ def history_detail(chat, number):
         if later_paras:
             out.append("📍 Что было дальше")
             out.extend(later_paras)
-        return "\\n\\n".join(out).strip()
+        return "\n\n".join(out).strip()
 
     edited = editorial_rewrite(base)
     if edited and validate_editorial(edited, base):
