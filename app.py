@@ -1051,46 +1051,60 @@ def history_detail(chat, number):
     if edited and validate_editorial(edited, base):
         detail_body = reflow_editorial(edited)
     else:
-        # Если AI не дал качественную редактуру, делаем читаемую версию
-        # непосредственно из проверенного источника.
-        # Безопасный fallback: только предложения из проверенного источника,
-        # но с той же редакционной структурой, что и AI-версия.
-        source_sentences = safe[:10]
+        # Если AI-редактура не прошла проверку, НЕ публикуем исходные
+        # предложения подряд. Сначала строим короткие фактологические тезисы,
+        # затем просим Groq превратить их в самостоятельный текст.
+        detail_body = None
+        if GROQ_KEY and safe:
+            fact_lines = []
+            for s in safe[:8]:
+                s = re.sub(r"^\\s*", "", s).strip()
+                if s:
+                    fact_lines.append("• " + s)
+            fact_source = "\\n".join(fact_lines)
 
-        def build_fallback(sentences):
-            if not sentences:
-                return "📌 Что произошло\\n\\nПодробное описание события в доступном источнике отсутствует."
+            fallback_prompt = f"""Ты редактор исторического раздела NOWLY.
+Ниже даны проверенные факты. Напиши короткую самостоятельную заметку.
 
-            # Первые предложения описывают само событие. Последующие,
-            # если в них есть признаки продолжения/последствий, выносим отдельно.
-            later_markers = (
-                "после", "затем", "впоследствии", "позднее", "вскоре",
-                "ремонт", "восстанов", "возобнов", "заявил", "заявила",
-                "заявили", "начал", "началась", "начались"
-            )
+ВАЖНО:
+— не копируй предложения из блока фактов;
+— не используй одинаковую последовательность из 7 слов;
+— перестраивай предложения и меняй порядок подачи;
+— можно сокращать второстепенные детали;
+— нельзя добавлять ни одного нового факта, числа, имени, даты или причины;
+— заявления сторон сохраняй как заявления;
+— не используй знания из памяти.
 
-            split_at = len(sentences)
-            if len(sentences) >= 4:
-                for i in range(2, len(sentences)):
-                    if any(m in sentences[i].casefold() for m in later_markers):
-                        split_at = i
-                        break
+Формат:
+📌 Что произошло
 
-            main_sentences = sentences[:split_at]
-            later_sentences = sentences[split_at:]
+2 коротких абзаца.
 
-            out = ["📌 Что произошло"]
-            for i in range(0, len(main_sentences), 2):
-                out.append(" ".join(main_sentences[i:i + 2]))
+📍 Что было дальше
 
-            if later_sentences:
-                out.append("📍 Что было дальше")
-                for i in range(0, len(later_sentences), 2):
-                    out.append(" ".join(later_sentences[i:i + 2]))
+1 короткий абзац, только если факты действительно содержат продолжение события.
 
-            return "\n\n".join(out)
+ФАКТЫ:
+{fact_source[:9000]}
+"""
+            try:
+                rewritten = groq(fallback_prompt, 0.25, 650)
+                if rewritten and validate_editorial(rewritten.strip(), base):
+                    detail_body = reflow_editorial(rewritten.strip())
+            except Exception as e:
+                print("HISTORY FACT EDITOR ERROR:", repr(e))
 
-        detail_body = build_fallback(source_sentences)
+        # Крайний fallback: не выдаём длинную копию источника. Показываем
+        # только краткую подтверждённую суть события.
+        if not detail_body:
+            first = safe[0] if safe else ""
+            second = safe[1] if len(safe) > 1 else ""
+            detail_body = "📌 Что произошло"
+            if first:
+                detail_body += "\\n\\n" + first
+            if second:
+                detail_body += "\\n\\n" + second
+
 
     display_title = re.sub(r"[.!?]+$", "", str(item["title"]).strip())
     detail = f"📖 {item['year']} — {display_title}\n\n{detail_body}".strip()
