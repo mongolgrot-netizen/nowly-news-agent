@@ -1119,17 +1119,38 @@ def process_news(chat, category="news", region=None):
         send(chat, f"🔎 Проверка: {labels.get(status, '⚪ не определено')}\n{rec}\nTelegram первым: {tg_first} • Telegram — основной источник: {tg_primary}\n{str(data.get('reason',''))[:700]}")
         post = str(data.get("post","")).strip()
         if not post:
-            post = f"📰 {title}\n\n{summary[:900]}\n\nИсточник: {link}\n\n⚠️ Черновик требует ручной проверки."
+            # Never expose a foreign-language RSS title in a fallback draft.
+            fallback_prompt = f"""Перепиши этот материал как короткую новость на русском языке.
+Заголовок: {title}
+Описание: {summary[:700]}
+Верни 2 коротких абзаца и заголовок на русском. Не добавляй фактов, которых нет в исходнике."""
+            try:
+                fallback = groq(fallback_prompt, 0.2, 220).strip()
+            except Exception:
+                fallback = ""
+            post = fallback or f"📰 Новость требует проверки редактора.\n\n{summary[:900]}\n\nИсточник: {link}\n\n⚠️ Черновик требует ручной проверки."
         if recommendation == "hold":
-            send(chat, "⚠️ Редактор: материал не прошёл порог автоматической публикации. Кнопка публикации заблокирована; при необходимости проверь его вручную по источнику.")
-            buttons = [[{"text":"❌ Отклонить","callback_data":"no"}]]
+            # Single-source material is not automatically blocked for low-risk
+            # obituary/biography/history/science/culture stories from a major outlet.
+            low_risk_single_source = (
+                status == "single_source"
+                and category in ("history", "russia_tech", "tech", "humor")
+                and any(domain in (link or "").lower()
+                        for domain in ("bbc.", "reuters.", "apnews.", "npr.", "dw.", "theguardian."))
+            )
+            if low_risk_single_source:
+                recommendation = "publish"
+                data["reason"] = "Один надёжный источник допустим для низкорисковой биографической/исторической/научной новости; спорных признаков не обнаружено."
+            else:
+                send(chat, "⚠️ Редактор: материал не прошёл порог автоматической публикации. Кнопка публикации заблокирована; при необходимости проверь его вручную по источнику.")
+                buttons = [[{"text":"❌ Отклонить","callback_data":"no"}]]
         else:
             buttons = [[{"text":"✅ Опубликовать","callback_data":"pub"},{"text":"❌ Отклонить","callback_data":"no"}]]
     except Exception as e:
         print("AI ERROR:", repr(e))
         post = (
             f"⚠️ AI-редактор временно недоступен.\n\n"
-            f"Черновик: {title}\n\n{summary[:900]}\n\n"
+            f"Черновик требует ручной проверки.\n\n{summary[:900]}\n\n"
             f"Источник: {link}\n\n"
             "Новость НЕ считается проверенной."
         )
