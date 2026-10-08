@@ -473,6 +473,18 @@ def history_day(chat, scope="world", region=None):
         send(chat, f"📅 ЭТОТ ДЕНЬ В ИСТОРИИ — {date_label}\n\nНе удалось получить исторические события за сегодняшнюю дату.")
         return
 
+    # Apply a deterministic geographic pre-filter BEFORE AI. The model must
+    # never be asked to decide whether an obviously foreign event belongs to
+    # the Russia feed.
+    russia_terms = [
+        "росси", "россий", "русск", "ссср", "союз советских", "рсфср",
+        "советск", "москв", "санкт-петербург", "ленинград", "екатеринбург",
+        "новосибирск", "якут", "владикавказ", "малгобек", "ржев", "ельня",
+        "елец", "крым", "крымск", "севастопол", "обь", "сибир", "ураль",
+        "казан", "самар", "перм", "нижн новгород", "владивосток",
+        "калининград", "кавказ", "россия"
+    ]
+
     candidates = []
     for ev in events[:40]:
         text_ev = (ev.get("text") or "").strip()
@@ -481,6 +493,7 @@ def history_day(chat, scope="world", region=None):
         if not text_ev:
             continue
         page_refs = []
+        search_blob = text_ev.lower()
         for p in pages[:2]:
             if not isinstance(p, dict):
                 continue
@@ -488,6 +501,14 @@ def history_day(chat, scope="world", region=None):
             url = p.get("content_urls", {}).get("desktop", {}).get("page") or ""
             if title or url:
                 page_refs.append({"title": title, "url": url})
+            search_blob += " " + title.lower()
+
+        # For Russia, require an explicit Russian/USSR geographic or political
+        # marker. This removes events such as Balticconnector, Afghanistan,
+        # Kashmir and foreign athletes before the AI sees them.
+        if scope == "russia" and not any(term in search_blob for term in russia_terms):
+            continue
+
         candidates.append({"year": year, "text": text_ev[:1500], "pages": page_refs})
 
     if not candidates:
@@ -525,7 +546,7 @@ def history_day(chat, scope="world", region=None):
 INDEX|YEAR|TITLE|SHORT_SUMMARY
 
 INDEX — номер записи в исходном списке, начиная с 1.
-SHORT_SUMMARY — 1–2 коротких предложения, только факты из исходных данных.
+SHORT_SUMMARY — 1 короткое предложение, только факты из исходных данных. Не повторяй дословно TITLE.
 Не используй символ | внутри полей.
 Не добавляй нумерацию, Markdown или другие строки.
 
@@ -647,7 +668,9 @@ def history_detail(chat, number):
 Источники:
 {source_text}
 
-Не используй Markdown-разметку. Не придумывай URL.
+Не используй Markdown-разметку. URL источников вставляй только из блока «ИСХОДНЫЕ ДАННЫЕ».
+Если в исходных данных недостаточно информации для раздела — НЕ создавай этот раздел.
+Не ставь тире-заглушки и не повторяй одно и то же предложение в нескольких разделах.
 Не добавляй служебных предупреждений.
 
 ИСХОДНЫЕ ДАННЫЕ:
