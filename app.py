@@ -1371,6 +1371,11 @@ def _process_news(chat, category="news", region=None):
             m = re.search(r"\[Редакция:\s*([^\]]+)\]", str(x[2]))
             if m and any(a.lower() in m.group(1).lower() for a in allowed_names) and m.group(1) not in source_names:
                 source_names.append(m.group(1))
+        if category in ("russia", "laws", "kremlin", "russia_tech"):
+            for publisher in sorted(verified_ru_publishers):
+                display = next((v for k, v in ru_domain_map.items() if v.lower() == publisher), None)
+                if display and display not in source_names:
+                    source_names.append(display)
         if not source_names:
             source_names = [re.sub(r"^www\\.", "", re.sub(r"^https?://", "", link)).split("/")[0]]
         source_line = " • ".join(source_names[:4])
