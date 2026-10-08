@@ -666,31 +666,68 @@ def story_relevance(target, item):
     return 0
 
 def sanitize_legal_post(post, category, title="", summary="", evidence=""):
-    """Remove unsupported future claims from legal/news drafts."""
+    """Remove unsupported future/legal claims from generated posts."""
     if not post or category not in ("russia", "laws", "kremlin", "russia_tech"):
         return post
+
     source_text = f"{title} {summary} {evidence}".lower()
     cleaned = []
+
     for line in str(post).splitlines():
         sentences = re.split(r"(?<=[.!?])\s+", line.strip())
         kept = []
+
         for sentence in sentences:
-            low = sentence.lower()
-            unsupported = (
-                any(k in low for k in ("ожидается", "предполагается", "планируется"))
+            low = sentence.lower().strip()
+
+            # Never let the editor turn a draft into an adopted/approved act
+            # or invent that the draft will be reviewed, approved or become
+            # mandatory. Keep such wording only when the source explicitly
+            # contains the same concrete claim.
+            blocked_phrases = (
+                "проект будет рассмотрен",
+                "проект рассмотрят",
+                "проект будет утвержден",
+                "проект утвердят",
+                "проект будет принят",
+                "проект примут",
+                "проект будет одобрен",
+                "проект одобрят",
+                "проект будет обсужден",
+                "проект будет обсуждаться",
+                "проект обсудят",
+                "станет обязательным нормативным актом",
+                "станет обязательным документом",
+                "станет обязательным законом",
+            )
+
+            is_blocked = any(p in low for p in blocked_phrases)
+
+            # Generic predictive wording is also unsafe for legal news unless
+            # the source itself contains a very close formulation.
+            if (
+                not is_blocked
+                and any(k in low for k in ("ожидается", "предполагается", "планируется"))
                 and any(k in low for k in ("проект", "постанов", "документ"))
-                and any(k in low for k in ("обсужд", "рассмотр", "утвержд", "принят", "одобрен", "обязательн", "станет"))
-            ) or "станет обязательным нормативным актом" in low
-            if unsupported:
-                words = [w for w in re.sub(r"[^а-яё0-9 ]+", " ", low).split() if len(w) >= 6]
-                stop = {"ожидается","предполагается","планируется","проект","документ","соответствующих","органах"}
-                meaningful = [w for w in words if w not in stop]
-                overlap = sum(1 for w in set(meaningful) if w in source_text)
-                if overlap < 2:
+                and any(k in low for k in (
+                    "обсужд", "рассмотр", "утвержд", "принят",
+                    "одобрен", "обязательн", "станет"
+                ))
+            ):
+                is_blocked = True
+
+            if is_blocked:
+                normalized = re.sub(r"\\s+", " ", low).strip()
+                # Require the actual source text to contain the same sentence
+                # (or a substantial substring) before allowing it through.
+                if normalized not in source_text and low not in source_text:
                     continue
+
             kept.append(sentence)
+
         if kept:
             cleaned.append(" ".join(kept))
+
     return "\n".join(cleaned).strip()
 def related_items(target, items, max_items=5):
     # Compare title + summary, not title only.
