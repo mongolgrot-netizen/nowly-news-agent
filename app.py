@@ -937,15 +937,17 @@ def history_detail(chat, number):
         if len(out_norm) >= 180 and out_norm in src_norm:
             return False
 
-        # Проверяем, что текст действительно разбит на абзацы и не превратился
-        # в одну длинную стену текста.
-        body_lines = [x.strip() for x in text.split("\n") if x.strip()]
-        if len(body_lines) < 3:
+        # AI может вернуть весь текст одним абзацем. Это не ошибка:
+        # reflow_editorial() ниже сам разобьёт его по предложениям.
+        body_text = re.sub(r"(?m)^\s*[📌📍].*$", "", text)
+        body_text = re.sub(r"\s+", " ", body_text).strip()
+        sentences_count = len([
+            s for s in re.split(r"(?<=[.!?])\s+", body_text)
+            if s.strip()
+        ])
+        if sentences_count < 3:
             return False
-        paragraph_lines = [x for x in body_lines if not x.startswith(("📌", "📍"))]
-        if len(paragraph_lines) < 2:
-            return False
-        if any(len(x) > 650 for x in paragraph_lines):
+        if len(body_text) > 3000:
             return False
 
         src_words = set(re.findall(r"[а-яёa-z]{4,}", source_text.casefold()))
