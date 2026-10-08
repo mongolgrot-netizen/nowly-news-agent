@@ -534,7 +534,19 @@ def history_day(chat, scope="world", region=None):
     enriched = []
     for ev in candidates[:24]:
         query_title = ev["pages"][0]["title"] if ev.get("pages") and ev["pages"][0].get("title") else ev["text"]
-        ev["ruwiki"] = ruwiki_search_event(query_title)
+        rw = ruwiki_search_event(query_title)
+        # Reject obviously generic/unrelated Ruwiki hits. A generic page such
+        # as "Год" is not useful evidence for a specific historical event.
+        if rw:
+            q_words = {
+                w for w in re.findall(r"[а-яёa-z0-9]{4,}", query_title.lower())
+                if w not in {"год", "года", "история", "событие"}
+            }
+            r_words = set(re.findall(r"[а-яёa-z0-9]{4,}", (rw.get("title") or "").lower()))
+            overlap = len(q_words & r_words)
+            if (rw.get("title") or "").strip().casefold() in {"год", "события", "история"} or (q_words and overlap == 0):
+                rw = None
+        ev["ruwiki"] = rw
         enriched.append(ev)
 
     scope_text = _history_scope_text(scope, region)
@@ -586,12 +598,33 @@ SHORT_SUMMARY — 1 короткое предложение, только фак
             if any(x["source_index"] == idx for x in selected):
                 continue
             src = enriched[idx - 1]
-            raw_title = ((src.get("pages") or [{}])[0].get("title") or "").strip()
+            page_title = ((src.get("pages") or [{}])[0].get("title") or "").strip()
+            # Wikimedia sometimes uses a useless calendar/person title such
+            # as "2014 год" or a person's full name. Prefer the actual event
+            # sentence when the page title is not an event title.
+            if (
+                not page_title
+                or re.fullmatch(r"\d{4}\s*год(?:а)?", page_title, re.I)
+                or len(page_title.split()) <= 2 and re.search(r"^(?:скура|троцк|ганна|группа|год)", page_title, re.I)
+            ):
+                raw_title = re.split(r"(?<=[.!?])\s+", src["text"].strip(), maxsplit=1)[0].strip()
+                raw_title = re.sub(r"^\d{4}\s*(?:год(?:а)?\s*)?[—–:-]?\s*", "", raw_title, flags=re.I).strip()
+                if len(raw_title) > 180:
+                    raw_title = raw_title[:177].rsplit(" ", 1)[0] + "…"
+            else:
+                raw_title = page_title
             if not raw_title:
-                raw_title = src["text"].split(".")[0].strip()
+                raw_title = src["text"][:180].strip()
+
             summary = parts[2].strip()
+            # If the model repeated the title, derive a non-duplicating
+            # remainder from the original calendar text instead of repeating
+            # the same sentence.
             if not summary or summary.casefold() == raw_title.casefold() or raw_title.casefold() in summary.casefold():
-                summary = src["text"].strip()
+                remainder = src["text"].strip()
+                if remainder.casefold().startswith(raw_title.casefold()):
+                    remainder = remainder[len(raw_title):].lstrip(" .:—–-")
+                summary = remainder.strip()
             selected.append({
                 "source_index": idx,
                 "year": parts[1] or src["year"],
@@ -714,6 +747,13 @@ def history_detail(chat, number):
     except Exception as ex:
         print("HISTORY DETAIL AI:", repr(ex))
         detail = ""
+
+    # Sources are rendered by NOWLY itself. This prevents the model from
+    # returning raw Markdown links that Telegram displays literally.
+    if detail:
+        detail = re.sub(r"\n?Источники:\s*[\s\S]*$", "", detail, flags=re.I).strip()
+        if source_text:
+            detail += "\n\nИсточники:\n" + source_text
 
     if not detail:
         detail = (
