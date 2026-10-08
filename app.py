@@ -731,14 +731,13 @@ def sanitize_legal_post(post, category, title="", summary="", evidence=""):
 
             # Generic predictive wording is also unsafe for legal news unless
             # the source itself contains a very close formulation.
+            # Do not publish model-generated expectations/predictions about a draft.
+            # Even if a source mentions a future step, the safe NOWLY wording is to
+            # state only the current document status unless the exact claim is quoted.
             if (
                 not is_blocked
                 and any(k in low for k in ("ожидается", "предполагается", "планируется"))
                 and any(k in low for k in ("проект", "постанов", "документ"))
-                and any(k in low for k in (
-                    "обсужд", "рассмотр", "утвержд", "принят",
-                    "одобрен", "обязательн", "станет"
-                ))
             ):
                 is_blocked = True
 
