@@ -702,13 +702,15 @@ def search_related_news(target, max_items=8):
     if any(x in raw_text for x in ("bassam", "al-hassan", "austin tice", "tice")):
         base_queries.insert(0, "NPR BBC Bassam al-Hassan Austin Tice")
         base_queries.insert(1, '"BBC and NPR" Bassam al-Hassan')
+        base_queries.insert(2, '"BBC and NPR" "Austin Tice" site:kpbs.org')
+        base_queries.insert(3, '"BBC and NPR" "Austin Tice" site:wxxi.org')
 
-    publishers = [("reuters.com","Reuters"),("apnews.com","AP"),("bbc.com","BBC"),("bbc.co.uk","BBC"),("news.sky.com","Sky News"),("theguardian.com","The Guardian"),("itv.com","ITV News"),("aljazeera.com","Al Jazeera"),("dw.com","DW"),("france24.com","France 24"),("npr.org","NPR")]
+    publishers = [("reuters.com","Reuters"),("apnews.com","AP"),("bbc.com","BBC"),("bbc.co.uk","BBC"),("news.sky.com","Sky News"),("theguardian.com","The Guardian"),("itv.com","ITV News"),("aljazeera.com","Al Jazeera"),("dw.com","DW"),("france24.com","France 24"),("npr.org","NPR"),("kpbs.org","NPR"),("wxxi.org","NPR")]
     queries = []
     # Check BBC/NPR co-publishing first so the small result budget is not consumed by duplicates.
     for domain, publisher_name in publishers:
         if publisher_name in ("NPR", "BBC"):
-            for q in base_queries[:2]:
+            for q in base_queries[:4]:
                 queries.append((f"site:{domain} {q}", (domain, publisher_name)))
     for domain, publisher_name in publishers:
         for q in base_queries[:2]:
@@ -752,7 +754,9 @@ def search_related_news(target, max_items=8):
                         "aljazeera.com": ["al jazeera", "aljazeera"],
                         "dw.com": ["dw", "deutsche welle"],
                         "france24.com": ["france 24"],
-                        "npr.org": ["npr", "national public radio", "wxxi", "kpbs", "npr news", "npr.org"]
+                        "npr.org": ["npr", "national public radio", "npr news", "npr.org"],
+                        "kpbs.org": ["kpbs", "npr"],
+                        "wxxi.org": ["wxxi", "npr"]
                     }
                     names = aliases.get(expected_domain, [expected_name.lower()])
                     if not any(a in low for a in names):
@@ -968,8 +972,16 @@ def process_news(chat, category="news", region=None):
 
         # Make publisher evidence explicit for the AI editor.
         evidence_text = " ".join(f"{x[0]} {x[2]}" for x in related).lower()
+        source_text = " ".join(f"{x[0]} {x[1]} {x[2]}" for x in related).lower()
         joint_publishers = []
-        if "npr" in evidence_text and "bbc" in (f"{title} {summary} " + evidence_text).lower():
+        # Deterministic recognition of the BBC/NPR investigation. Do not leave
+        # this critical editorial classification entirely to the LLM.
+        joint_story = any(k in (f"{title} {summary} {evidence_text} {source_text}").lower()
+                          for k in ("bassam al-hassan", "austin tice", "where is austin tice"))
+        has_bbc = "bbc" in (f"{title} {summary} {evidence_text} {source_text}").lower()
+        has_npr = any(k in (f"{title} {summary} {evidence_text} {source_text}").lower()
+                      for k in ("npr", "kpbs", "wxxi", "national public radio"))
+        if has_bbc and has_npr and joint_story:
             joint_publishers = ["BBC", "NPR"]
 
         source_lines = [(title, link)] + [(x[0], x[1]) for x in related[:10]]
