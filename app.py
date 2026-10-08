@@ -484,6 +484,19 @@ def history_day(chat, scope="world", region=None):
         "казан", "самар", "перм", "нижн новгород", "владивосток",
         "калининград", "кавказ", "россия"
     ]
+    # Foreign locations override weak Russia mentions.
+    foreign_terms = [
+        "украин", "украина", "украинск", "киев", "переяслав",
+        "афганистан", "афган", "кашмир", "индия", "итали", "италия",
+        "германи", "франци", "британ", "великобритани", "сша", "америк",
+        "кита", "япони", "польша", "польск", "чехи", "чехия",
+        "австр", "венгр", "румыни", "болгари", "югослав",
+        "египет", "иран", "ирак", "сири", "израил", "палестин",
+        "турци", "турция", "казахстан", "белорус", "беларус",
+        "грузи", "армени", "азербайджан", "литв", "латви", "эстон",
+        "финлян", "норвеги", "швеци", "дани", "испан", "португал",
+        "швейцар", "нидерланд", "бельги", "канад"
+    ]
 
     candidates = []
     for ev in events[:40]:
@@ -506,8 +519,11 @@ def history_day(chat, scope="world", region=None):
         # For Russia, require an explicit Russian/USSR geographic or political
         # marker. This removes events such as Balticconnector, Afghanistan,
         # Kashmir and foreign athletes before the AI sees them.
-        if scope == "russia" and not any(term in search_blob for term in russia_terms):
-            continue
+        if scope == "russia":
+            has_russia_marker = any(term in search_blob for term in russia_terms)
+            has_foreign_marker = any(term in search_blob for term in foreign_terms)
+            if not has_russia_marker or has_foreign_marker:
+                continue
 
         candidates.append({"year": year, "text": text_ev[:1500], "pages": page_refs})
 
@@ -543,10 +559,10 @@ def history_day(chat, scope="world", region=None):
 8. Никаких служебных комментариев.
 
 ОТВЕТ — строго по одной строке на событие:
-INDEX|YEAR|TITLE|SHORT_SUMMARY
+INDEX|YEAR|SHORT_SUMMARY
 
 INDEX — номер записи в исходном списке, начиная с 1.
-SHORT_SUMMARY — 1 короткое предложение, только факты из исходных данных. Не повторяй дословно TITLE.
+SHORT_SUMMARY — 1 короткое предложение, только факты из исходных данных. Не повторяй название события и не копируй его дословно.
 Не используй символ | внутри полей.
 Не добавляй нумерацию, Markdown или другие строки.
 
@@ -558,8 +574,8 @@ SHORT_SUMMARY — 1 короткое предложение, только фак
     try:
         raw = groq(digest_prompt, 0.05, 1800).strip()
         for line in raw.splitlines():
-            parts = [p.strip() for p in line.split("|", 3)]
-            if len(parts) != 4:
+            parts = [p.strip() for p in line.split("|", 2)]
+            if len(parts) != 3:
                 continue
             try:
                 idx = int(parts[0])
@@ -569,12 +585,19 @@ SHORT_SUMMARY — 1 короткое предложение, только фак
                 continue
             if any(x["source_index"] == idx for x in selected):
                 continue
+            src = enriched[idx - 1]
+            raw_title = ((src.get("pages") or [{}])[0].get("title") or "").strip()
+            if not raw_title:
+                raw_title = src["text"].split(".")[0].strip()
+            summary = parts[2].strip()
+            if not summary or summary.casefold() == raw_title.casefold() or raw_title.casefold() in summary.casefold():
+                summary = src["text"].strip()
             selected.append({
                 "source_index": idx,
-                "year": parts[1] or enriched[idx - 1]["year"],
-                "title": parts[2],
-                "summary": parts[3],
-                "source": enriched[idx - 1]
+                "year": parts[1] or src["year"],
+                "title": raw_title[:180],
+                "summary": summary[:500],
+                "source": src
             })
             if len(selected) >= 8:
                 break
@@ -606,6 +629,8 @@ SHORT_SUMMARY — 1 короткое предложение, только фак
     for n, item in enumerate(selected, 1):
         title = item["title"] or str(item["summary"])[:100]
         summary = item["summary"].strip()
+        if summary.casefold() == title.casefold() or title.casefold() in summary.casefold():
+            summary = item["source"].get("text", summary).strip()
         lines.append(f"🔹 {item['year']} — {title}")
         lines.append(summary)
         lines.append("")
