@@ -693,16 +693,16 @@ def search_related_news(target, max_items=10):
         if len(title_terms) >= 2:
             base_queries.append(" ".join(title_terms[:5]))
 
-    publishers = ["reuters.com","apnews.com","bbc.com","bbc.co.uk","news.sky.com","theguardian.com","itv.com","aljazeera.com","dw.com","france24.com"]
+    publishers = [("reuters.com","Reuters"),("apnews.com","AP"),("bbc.com","BBC"),("bbc.co.uk","BBC"),("news.sky.com","Sky News"),("theguardian.com","The Guardian"),("itv.com","ITV News"),("aljazeera.com","Al Jazeera"),("dw.com","DW"),("france24.com","France 24"),("npr.org","NPR")]
     queries = []
-    for domain in publishers:
+    for domain, publisher_name in publishers:
         for q in base_queries[:2]:
-            queries.append((f"site:{domain} {q}", domain))
+            queries.append((f"site:{domain} {q}", (domain, publisher_name)))
     for q in base_queries[:4]:
         queries.append((q, None))
 
     out, seen = [], set()
-    for query, expected_domain in queries:
+    for query, expected_source in queries:
         if len(out) >= max_items:
             break
         url = "https://news.google.com/rss/search?q=" + requests.utils.quote(query) + "&hl=en&gl=US&ceid=US:en"
@@ -722,9 +722,24 @@ def search_related_news(target, max_items=10):
                 key = l or t.lower()
                 if key in seen:
                     continue
-                if expected_domain:
+                if expected_source:
+                    expected_domain, expected_name = expected_source
                     low = (t + " " + l + " " + source_name).lower()
-                    if expected_domain not in low:
+                    aliases = {
+                        "reuters.com": ["reuters"],
+                        "apnews.com": ["associated press", "ap news", "ap"],
+                        "bbc.com": ["bbc"],
+                        "bbc.co.uk": ["bbc"],
+                        "news.sky.com": ["sky news", "sky"],
+                        "theguardian.com": ["the guardian", "guardian"],
+                        "itv.com": ["itv news", "itv"],
+                        "aljazeera.com": ["al jazeera", "aljazeera"],
+                        "dw.com": ["dw", "deutsche welle"],
+                        "france24.com": ["france 24"],
+                        "npr.org": ["npr", "national public radio"]
+                    }
+                    names = aliases.get(expected_domain, [expected_name.lower()])
+                    if not any(a in low for a in names):
                         continue
                 seen.add(key)
                 out.append((t,l,sm))
