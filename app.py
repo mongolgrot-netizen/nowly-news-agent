@@ -1391,7 +1391,7 @@ def _process_news(chat, category="news", region=None):
             # Safe deterministic fallback for confirmed federal/legal stories.
             # Never expose a Google News redirect as the public source.
             clean_summary = re.sub(r"<[^>]+>", " ", str(summary or "")).strip()
-            clean_summary = re.sub(r"\\s+", " ", clean_summary)
+            clean_summary = re.sub(r"\s+", " ", clean_summary)
             if category in ("russia", "laws", "kremlin", "russia_tech"):
                 post = (
                     f"{title}\n\n"
