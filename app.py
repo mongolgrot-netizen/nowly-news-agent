@@ -1021,6 +1021,8 @@ def process_news(chat, category="news", region=None):
         related = related_items((title, link, summary, region_tag), items, max_items=3)
         searched = search_related_news((title, link, summary, region_tag), max_items=8)
         telegram_sources = search_telegram_news((title, link, summary, region_tag), max_items=3)
+        tg_first = bool(telegram_sources)
+        tg_primary = any(any(k in (str(x[0]) + " " + str(x[2])).lower() for k in ("первоисточник", "первая публикация", "первым сообщил", "exclusive")) for x in telegram_sources)
 
         pool = related + searched + telegram_sources
         seen = set()
