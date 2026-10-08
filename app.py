@@ -430,8 +430,12 @@ def _history_clean_ai(text):
     """Remove Markdown links that the model may add despite instructions."""
     if not text:
         return ""
-    text = re.sub(r"\[([^\]]+)\]\((https?://[^)]+)\)", r"\1: \2", text)
+    # Telegram should receive normal text, not Markdown link syntax.
+    # Use a line-level match so Wikipedia URLs containing parentheses are preserved.
+    text = re.sub(r"\[([^\]]+)\]\((https?://.*)\)", r"\1: \2", text)
     text = re.sub(r"\[?(https?://[^\s\]\)]+)\]?", r"\1", text)
+    text = re.sub(r"(?m)^\s*[-*]\s+", "- ", text)
+    text = text.replace("\\\\-", "-")
     return text.strip()
 
 def _history_wiki_extract(title):
@@ -610,6 +614,7 @@ INDEX|YEAR|SHORT_SUMMARY
 
 INDEX — номер записи в исходном списке, начиная с 1.
 SHORT_SUMMARY — 1 короткое предложение, только факты из исходных данных. Не повторяй название события и не копируй его дословно.
+Старайся назвать конкретное действие, место, результат или другой факт из исходной записи, а не писать пустую фразу вроде «произошло событие».
 Не используй символ | внутри полей.
 Не добавляй нумерацию, Markdown или другие строки.
 
@@ -640,7 +645,9 @@ SHORT_SUMMARY — 1 короткое предложение, только фак
             if (
                 not page_title
                 or re.fullmatch(r"\d{4}\s*год(?:а)?", page_title, re.I)
-                or len(page_title.split()) <= 2 and re.search(r"^(?:скура|троцк|ганна|группа|год)", page_title, re.I)
+                # Wikimedia can return a person's name instead of the event title.
+                or "," in page_title
+                or (len(page_title.split()) <= 2 and re.search(r"^(?:скура|троцк|ганна|группа|год)", page_title, re.I))
             ):
                 raw_title = re.split(r"(?<=[.!?])\s+", src["text"].strip(), maxsplit=1)[0].strip()
                 raw_title = re.sub(r"^\d{4}\s*(?:год(?:а)?\s*)?[—–:-]?\s*", "", raw_title, flags=re.I).strip()
@@ -783,7 +790,7 @@ def history_detail(chat, number):
 Источники:
 {source_text}
 
-Не используй Markdown-разметку. URL источников вставляй только из блока «ИСХОДНЫЕ ДАННЫЕ».
+Не используй Markdown-разметку, обратные слэши перед дефисами и квадратные скобки для ссылок. URL источников не выводи в тексте статьи: их добавит NOWLY автоматически. Используй URL только как источник для проверки фактов.
 Если в исходных данных недостаточно информации для раздела — НЕ создавай этот раздел.
 Не ставь тире-заглушки и не повторяй одно и то же предложение в нескольких разделах.
 Не добавляй служебных предупреждений.
