@@ -265,18 +265,20 @@ def setup_webhook():
 
 def send(chat, text, buttons=None):
     text = str(text).replace('\\n', '\n')
-    # Final Telegram cleanup: remove Markdown/MediaWiki syntax before Telegram.
-    def clean_line(line):
-        line = re.sub(r"\[(https?://[^\]]+)\]\([^\n]+\)", r"\1", line)
+    lines = []
+    for line in text.split("\n"):
+        # Source lines: always keep only the first URL, regardless of Markdown syntax.
+        if line.startswith(("Wikipedia:", "Рувики:")):
+            m = re.search(r"https?://[^\s\]\)]+(?:\\\([^\s\)]*\\\))?", line)
+            line = (line.split(":", 1)[0] + ": " + m.group(0)) if m else line
+        line = re.sub(r"\[(https?://[^\]]+)\]\([^\n]*\)", r"\1", line)
         line = re.sub(r"\[([^\]]+)\]\((https?://[^\n]+)\)", lambda m: m.group(1) + ": " + m.group(2).rstrip(")"), line)
         line = re.sub(r"\[(https?://[^\]]+)\]", r"\1", line)
         line = re.sub(r"^\s*={2,6}\s*(.*?)\s*={2,6}\s*$", r"\1", line)
-        line = re.sub(r"^\s*={2,6}\s*", "", line)
-        line = re.sub(r"\s*={2,6}\s*$", "", line)
-        return line
-    text = "\n".join(clean_line(line) for line in text.split("\n"))
-    text = re.sub(r"\\(?=[-*_=\[\]()])", "", text)
-    text = re.sub(r"(?m)^\s*[-*]\s+", "- ", text)
+        line = re.sub(r"\\(?=[-*_=\[\]()])", "", line)
+        line = re.sub(r"(?m)^\s*[-*]\s+", "- ", line)
+        lines.append(line)
+    text = "\n".join(lines)
     data = {"chat_id": chat, "text": text, "disable_web_page_preview": "false"}
     if buttons:
         data["reply_markup"] = json.dumps({"inline_keyboard": buttons}, ensure_ascii=False)
@@ -743,7 +745,6 @@ def history_detail(chat, number):
     if not cache:
         send(chat, "⚠️ Материал истории больше не доступен. Запусти «Этот день в истории» заново.")
         return
-
     try:
         item = cache["events"][int(number) - 1]
     except (ValueError, IndexError, TypeError):
@@ -753,105 +754,84 @@ def history_detail(chat, number):
     ev = item["source"]
     source_text = _history_source_lines(ev)
     page_title = ((ev.get("pages") or [{}])[0].get("title") or "").strip()
-    wiki_extract = ""
-    if page_title and not re.fullmatch(r"d{4}\s*год(?:а)?", page_title, re.I):
-        wiki_extract = _history_wiki_extract(page_title)
+    wiki_extract = _history_wiki_extract(page_title) if page_title and not re.fullmatch(r"\d{4}\s*год(?:а)?", page_title, re.I) else ""
     rw_extract = ((ev.get("ruwiki") or {}).get("extract") or "").strip()
 
-    # Build a compact evidence dossier instead of sending a huge encyclopedia
-    # article to the editor. This prevents NOWLY from copying long sections.
-    def compact_extract(text, limit=7000):
+    def clean_extract(text):
         if not text:
             return ""
         text = re.sub(r"(?m)^\s*={2,6}\s*(.*?)\s*={2,6}\s*$", r"\1", text)
         text = re.sub(r"\[\d+\]", "", text)
         text = re.sub(r"\s+", " ", text).strip()
-        return text[:limit]
+        return text
 
+    wiki_clean = clean_extract(wiki_extract)
+    rw_clean = clean_extract(rw_extract)
     evidence = {
         "calendar_event": ev.get("text", ""),
-        "wikipedia": compact_extract(wiki_extract),
-        "ruwiki": compact_extract(rw_extract),
+        "wikipedia": wiki_clean[:6500],
+        "ruwiki": rw_clean[:6500]
     }
 
-    detail_prompt = f"""Ты редактор исторической рубрики Telegram-канала NOWLY.
+    detail_prompt = f"""Ты редактор исторической рубрики NOWLY.
+Напиши самостоятельный, короткий и фактический материал об одном событии.
 
-Подготовь короткий самостоятельный исторический материал по одному событию.
-Это НЕ пересказ Wikipedia и НЕ копирование энциклопедической статьи.
-
+Год: {item["year"]}
+Название: {item["title"]}
 Дата: {cache["date"]}
-Охват: {_history_scope_text(cache["scope"], cache.get("region"))}
-Год события: {item["year"]}
-Название события: {item["title"]}
 
-ГЛАВНОЕ ПРАВИЛО:
-Используй только факты из ИСХОДНЫХ ДАННЫХ.
-Не используй знания из памяти модели.
-Не добавляй сведения, которых нет в исходных данных.
-Не копируй предложения из источника дословно.
-
-ЗАДАЧА:
-Сделай понятный материал для обычного читателя Telegram.
-Нужно ответить прежде всего на вопросы:
-1. Что произошло?
-2. Когда и где это произошло?
-3. Каковы подтверждённые последствия?
-4. Что произошло непосредственно после события?
-
-СТРОГО НЕ ДОБАВЛЯЙ:
-- политические оценки;
-- предположения о мотивах;
-- сведения о влиянии события на политиков;
-- фразы «по оценкам», если конкретная оценка не дана в источнике;
-- связь с другими событиями, если она не нужна для понимания самого события;
-- длинную предысторию;
-- разделы Wikipedia «Предыстория», «Версии», «Оценки», «Последствия» целиком;
-- информацию, которой нет в исходных данных.
+Используй ТОЛЬКО ИСХОДНЫЕ ДАННЫЕ. Не используй память модели.
+Не копируй источник дословно.
+Не добавляй оценки, мотивы, предположения, политические выводы или сведения о влиянии на политиков.
+Не пиши «по оценкам нескольких источников», если конкретная оценка не дана.
+Не включай длинную предысторию.
 
 ФОРМАТ:
-
 📖 {item["year"]} — {item["title"]}
 
 Что произошло:
-2–3 коротких абзаца.
+3–4 коротких предложения о самом событии: дата, место, действие, непосредственные последствия.
 
 Ключевые факты:
-• 3–6 конкретных фактов.
+• 4–6 конкретных фактов.
 
 Что было дальше:
-1 короткий абзац, только если продолжение подтверждено источниками.
+1–2 предложения только о подтверждённом продолжении или восстановлении.
 
-Не добавляй раздел «Источники» — NOWLY добавит его автоматически.
+Если какой-либо факт отсутствует, НЕ выдумывай его.
+Не добавляй раздел Источники.
 Не используй Markdown, MediaWiki, квадратные скобки, обратные слэши или URL.
-Не повторяй заголовок после него.
-Не используй слова «согласно Wikipedia» или «энциклопедия».
 
 ИСХОДНЫЕ ДАННЫЕ:
 {json.dumps(evidence, ensure_ascii=False)}
 """
-
     try:
-        detail = groq(detail_prompt, 0.05, 1500).strip()
+        detail = groq(detail_prompt, 0.05, 1800).strip()
     except Exception as ex:
         print("HISTORY DETAIL AI:", repr(ex))
         detail = ""
 
     detail = _history_clean_ai(detail) if detail else ""
 
-    # Guard against an editor failure: use the calendar fact rather than
-    # dumping a long encyclopedia extract into Telegram.
-    if not detail or len(detail) < 180:
-        fallback = ev.get("text", "").strip()
-        detail = f"📖 {item['year']} — {item['title']}\n\nЧто произошло:\n{fallback}"
+    # A useful deterministic fallback is better than repeating the event title.
+    if len(detail) < 500:
+        base = wiki_clean or rw_clean or ev.get("text", "")
+        base = re.sub(r"(?m)^\s*(Предыстория|Происшествие|Последствия|Ремонт|См\. также|Примечания|Литература|Ссылки)\s*$", "", base, flags=re.I)
+        sentences = re.split(r"(?<=[.!?])\s+", base)
+        sentences = [x.strip() for x in sentences if len(x.strip()) > 20]
+        core = " ".join(sentences[:10])
+        if len(core) > 2200:
+            core = core[:2200].rsplit(" ", 1)[0] + "…"
+        detail = (
+            f"📖 {item['year']} — {item['title']}\n\n"
+            f"Что произошло:\n{core}\n"
+        )
 
-    # Never let a model-generated source block or MediaWiki headings leak out.
     detail = re.sub(r"(?is)\n?Источники:\s*.*$", "", detail).strip()
     detail = re.sub(r"(?m)^\s*={2,6}\s*(.*?)\s*={2,6}\s*$", r"\1", detail)
     detail = re.sub(r"(?m)^\s*(Предыстория|См\. также|Примечания|Литература|Ссылки)\s*$", "", detail, flags=re.I)
     detail = re.sub(r"\n{3,}", "\n\n", detail).strip()
-
     if source_text:
-        # Append sources ourselves, never through the AI.
         detail += "\n\nИсточники:\n" + source_text
 
     chunks = []
@@ -866,13 +846,9 @@ def history_detail(chat, number):
         rest = rest[cut:].strip()
     if rest:
         chunks.append(rest)
-
     for part in chunks:
         send(chat, part)
-
-    send(chat, "↩️ Вернуться к списку событий", [[
-        {"text": "↩️ К событиям", "callback_data": "hist_back"}
-    ]])
+    send(chat, "↩️ Вернуться к списку событий", [[{"text": "↩️ К событиям", "callback_data": "hist_back"}]])
 
 def world_keyboard():
     return [
