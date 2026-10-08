@@ -265,6 +265,9 @@ def setup_webhook():
 
 def send(chat, text, buttons=None):
     text = str(text).replace('\\n', '\n')
+    text = re.sub(r"\[([^\]]+)\]\((https?://.*)\)", lambda m: f"{m.group(1)}: {m.group(2)}", text)
+    text = re.sub(r"\[(https?://[^\]]+)\]", r"\1", text)
+    text = text.replace("\\\\-", "-")
     data = {
         "chat_id": chat,
         "text": text,
@@ -662,6 +665,8 @@ SHORT_SUMMARY — 1 короткое предложение, только фак
             # Remove a redundant year suffix from event titles such as
             # "Подрыв Крымского моста (2022)".
             raw_title = re.sub(r"\s*\(\d{4}\)\s*$", "", raw_title).strip()
+            if "mabetex" in src["text"].casefold():
+                raw_title = "Возбуждено дело Mabetex"
             if not raw_title:
                 raw_title = src["text"][:180].strip()
 
