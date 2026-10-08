@@ -265,23 +265,19 @@ def setup_webhook():
 
 def send(chat, text, buttons=None):
     text = str(text).replace('\\n', '\n')
-    # Final Telegram cleanup. Source lines are normalized separately because
-    # Wikipedia URLs may contain parentheses and escaped characters.
+    # Final Telegram cleanup: remove Markdown/MediaWiki syntax before Telegram.
     def clean_line(line):
-        if "[" in line and "](" in line:
-            m = re.search(r"\[([^\]]+)\]\(", line)
-            if m and m.group(1).startswith(("http://", "https://")):
-                line = line[:m.start()] + m.group(1)
+        line = re.sub(r"\[(https?://[^\]]+)\]\([^\n]+\)", r"\1", line)
+        line = re.sub(r"\[([^\]]+)\]\((https?://[^\n]+)\)", lambda m: m.group(1) + ": " + m.group(2).rstrip(")"), line)
+        line = re.sub(r"\[(https?://[^\]]+)\]", r"\1", line)
+        line = re.sub(r"^\s*={2,6}\s*(.*?)\s*={2,6}\s*$", r"\1", line)
+        line = re.sub(r"^\s*={2,6}\s*", "", line)
+        line = re.sub(r"\s*={2,6}\s*$", "", line)
         return line
     text = "\n".join(clean_line(line) for line in text.split("\n"))
-    text = re.sub(r"\[(https?://[^\]]+)\]", r"\1", text)
-    text = re.sub(r"\\(?=[-*])", "", text)
+    text = re.sub(r"\\(?=[-*_=\[\]()])", "", text)
     text = re.sub(r"(?m)^\s*[-*]\s+", "- ", text)
-    data = {
-        "chat_id": chat,
-        "text": text,
-        "disable_web_page_preview": "false"
-    }
+    data = {"chat_id": chat, "text": text, "disable_web_page_preview": "false"}
     if buttons:
         data["reply_markup"] = json.dumps({"inline_keyboard": buttons}, ensure_ascii=False)
     return tg("sendMessage", data)
