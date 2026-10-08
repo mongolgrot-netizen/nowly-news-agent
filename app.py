@@ -1032,7 +1032,8 @@ def process_news(chat, category="news", region=None):
             if key != link and key not in seen:
                 seen.add(key)
                 merged.append(item)
-        related = merged[:10]
+        target = (title, link, summary, region_tag)
+        related = [x for x in merged[:10] if story_relevance(target, x) >= 3]
 
         # Make publisher evidence explicit for the AI editor.
         evidence_text = " ".join(f"{x[0]} {x[2]}" for x in related).lower()
@@ -1127,6 +1128,17 @@ def process_news(chat, category="news", region=None):
         data = json.loads(match.group(0)) if match else {}
         status = data.get("status", "single_source")
         recommendation = data.get("recommendation", "hold")
+        major_domains = ("reuters.", "apnews.", "bbc.", "npr.", "theguardian.", "dw.", "aljazeera.", "france24.")
+        major_sources = set()
+        for x in related:
+            low = f"{x[0]} {x[1]} {x[2]}".lower()
+            for domain in major_domains:
+                if domain in low:
+                    major_sources.add(domain)
+        if status == "single_source" and len(major_sources) >= 2:
+            status = "confirmed"
+            recommendation = "publish"
+            data["reason"] = "Материал подтверждён несколькими независимыми крупными СМИ."
         if joint_publishers:
             status = "joint_investigation"
             recommendation = "publish"
