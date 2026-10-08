@@ -1010,6 +1010,35 @@ def rank_news_candidates(items, category="news"):
     scored.sort(key=lambda x: (-x[0], x[1]))
     return [x[2] for x in scored]
 
+def verify_russian_story_direct(target, category="russia"):
+    title = target[0] if target else ""
+    summary = target[2] if len(target) > 2 else ""
+    raw = f"{title} {summary}".lower()
+    if category not in ("russia", "laws", "kremlin", "russia_tech"):
+        return []
+    if not any(k in raw for k in ("проект", "постанов", "правительств", "минцифры", "гарант", "электронн", "закон", "госдум", "указ")):
+        return []
+    queries = [title, " ".join(re.findall(r"[а-яё]{5,}", title.lower())[:7]), "проект постановления электронная почтовая система ГАРАНТ"]
+    publishers = [("Interfax", ("интерфакс","interfax")), ("ТАСС", ("тасс","tass")), ("РИА Новости", ("риа новости","ria")), ("РБК", ("рбк","rbc")), ("Коммерсантъ", ("коммерсант","kommersant")), ("Ведомости", ("ведомости","vedomosti")), ("ГАРАНТ", ("гарант","garant")), ("КонсультантПлюс", ("консультант","consultant"))]
+    out, seen = [], set()
+    for q in queries:
+        url = "https://news.google.com/rss/search?q=" + requests.utils.quote(q) + "&hl=ru&gl=RU&ceid=RU:ru"
+        try:
+            rr = requests.get(url, timeout=10, headers={"User-Agent":"NOWLY-News-Agent/1.0"})
+            f = feedparser.parse(rr.content)
+            for e in f.entries[:15]:
+                t = html.unescape(str(e.get("title","")).strip()); l = str(e.get("link","")).strip()
+                sm = html.unescape(str(e.get("summary","") or "").strip()); sm = re.sub(r"<[^>]+>", " ", sm)
+                src = str((e.get("source") or {}).get("title","")).strip(); txt = f"{t} {sm} {src}".lower()
+                if not t or not l or l == target[1]: continue
+                key = l or t.lower()
+                if key in seen: continue
+                matched = next((label for label, aliases in publishers if any(a in txt for a in aliases)), None)
+                if not matched or story_relevance(target,(t,l,sm)) < 2: continue
+                seen.add(key); out.append((t,l,f"[Редакция: {matched}] {sm}"))
+                if len(out) >= 10: return out
+        except Exception as e: print("DIRECT RU VERIFY ERROR:", repr(e))
+    return out
 def process_news(chat, category="news", region=None):
     category_name = CATEGORIES.get(category, "📰 Новости")
     scope = f" • {region}" if region else ""
@@ -1032,8 +1061,11 @@ def process_news(chat, category="news", region=None):
 
     title, link, summary, region_tag = selected[0]
     try:
+        direct_ru = verify_russian_story_direct((title, link, summary, region_tag), category)
         related = related_items((title, link, summary, region_tag), items, max_items=3)
         searched = search_related_news((title, link, summary, region_tag), max_items=8)
+        if direct_ru:
+            searched = direct_ru + searched
         telegram_sources = search_telegram_news((title, link, summary, region_tag), max_items=3)
         tg_first = bool(telegram_sources)
         tg_primary = any(any(k in (str(x[0]) + " " + str(x[2])).lower() for k in ("первоисточник", "первая публикация", "первым сообщил", "exclusive")) for x in telegram_sources)
