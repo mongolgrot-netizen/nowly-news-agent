@@ -1165,10 +1165,9 @@ def process_news(chat, category="news", region=None):
         admin_text = f"🔎 Проверка: {labels.get(status, '⚪ не определено')}\\n{rec}\\nИсточники: {source_line}"
         if tg_first or tg_primary:
             admin_text += f"\\nTelegram первым: {'да' if tg_first else 'нет'} • основной: {'да' if tg_primary else 'нет'}"
-        reason = str(data.get("reason","")).strip()
-        if reason:
-            admin_text += f"\\n{reason[:500]}"
         send(chat, admin_text)
+        if recommendation == "publish":
+            send(chat, "🟢 Рекомендовано к публикации")
         post = str(data.get("post","")).strip()
         post = re.sub(r"\[\s*(https?://[^\]\s]+)\s*\]", r"\1", post)
         post = post.replace("\\&", "&")
