@@ -1388,7 +1388,18 @@ def _process_news(chat, category="news", region=None):
                 fallback = groq(fallback_prompt, 0.2, 220).strip()
             except Exception:
                 fallback = ""
-            post = fallback or f"📰 Новость требует проверки редактора.\n\n{summary[:900]}\n\nИсточник: {link}\n\n⚠️ Черновик требует ручной проверки."
+            # Safe deterministic fallback for confirmed federal/legal stories.
+            # Never expose a Google News redirect as the public source.
+            clean_summary = re.sub(r"<[^>]+>", " ", str(summary or "")).strip()
+            clean_summary = re.sub(r"\\s+", " ", clean_summary)
+            if category in ("russia", "laws", "kremlin", "russia_tech"):
+                post = (
+                    f"{title}\n\n"
+                    f"{clean_summary[:900]}\n\n"
+                    f"Статус: проект документа."
+                ).strip()
+            else:
+                post = fallback or f"{title}\n\n{clean_summary[:900]}".strip()
         if recommendation == "hold":
             # Single-source material is not automatically blocked for low-risk
             # obituary/biography/history/science/culture stories from a major outlet.
