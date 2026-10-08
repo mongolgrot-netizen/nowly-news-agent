@@ -989,7 +989,6 @@ def process_news(chat, category="news", region=None):
         known_bbc_npr_story = (
             "bbc" in (f"{title} {summary}").lower()
             and any(k in (f"{title} {summary}").lower() for k in ("bassam", "al-hassan", "austin tice"))
-            and any(k in evidence_text for k in ("npr", "kpbs", "wxxi", "national public radio"))
         )
         if known_bbc_npr_story:
             joint_publishers = ["BBC", "NPR"]
