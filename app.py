@@ -666,37 +666,32 @@ def story_relevance(target, item):
     return 0
 
 def sanitize_legal_post(post, category, title="", summary="", evidence=""):
-    """Remove unsupported legal-news predictions that the model may hallucinate."""
+    """Remove unsupported future claims from legal/news drafts."""
     if not post or category not in ("russia", "laws", "kremlin", "russia_tech"):
         return post
     source_text = f"{title} {summary} {evidence}".lower()
-    lines = str(post).splitlines()
     cleaned = []
-    for line in lines:
-        # Remove unsupported predictive/expectational clauses sentence-by-sentence.
-        sentences = re.split(r"(?<=[.!?])\\s+", line.strip())
+    for line in str(post).splitlines():
+        sentences = re.split(r"(?<=[.!?])\s+", line.strip())
         kept = []
         for sentence in sentences:
             low = sentence.lower()
-            predictive = (
-                ("ожидается" in low or "предполагается" in low or "планируется" in low)
-                and "проект" in low
-                and any(k in low for k in ("рассмотр", "обсужд", "утвержд", "принят", "одобрен"))
-            ) or any(k in low for k in (
-                "проект будет рассмотрен", "проект будет утвержден",
-                "проект будет принят", "проект будет одобрен",
-                "проект рассмотрят", "проект утвердят", "проект примут", "проект одобрят"
-            ))
-            if predictive:
-                # Only keep it if the same substantive claim is explicitly present in source/evidence.
-                if not any(w in source_text for w in ("ожидается", "предполагается", "планируется")):
+            unsupported = (
+                any(k in low for k in ("ожидается", "предполагается", "планируется"))
+                and any(k in low for k in ("проект", "постанов", "документ"))
+                and any(k in low for k in ("обсужд", "рассмотр", "утвержд", "принят", "одобрен", "обязательн", "станет"))
+            ) or "станет обязательным нормативным актом" in low
+            if unsupported:
+                words = [w for w in re.sub(r"[^а-яё0-9 ]+", " ", low).split() if len(w) >= 6]
+                stop = {"ожидается","предполагается","планируется","проект","документ","соответствующих","органах"}
+                meaningful = [w for w in words if w not in stop]
+                overlap = sum(1 for w in set(meaningful) if w in source_text)
+                if overlap < 2:
                     continue
             kept.append(sentence)
         if kept:
             cleaned.append(" ".join(kept))
     return "\n".join(cleaned).strip()
-
-
 def related_items(target, items, max_items=5):
     # Compare title + summary, not title only.
     text_a = f"{target[0]} {target[2]}".lower()
