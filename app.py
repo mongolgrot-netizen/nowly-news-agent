@@ -668,72 +668,46 @@ def related_items(target, items, max_items=5):
     return [x[1] for x in scored[:max_items]]
 
 def search_related_news(target, max_items=10):
-    # Free cross-source lookup through Google News RSS.
-    # Use several independent query formulations. This is important for
-    # English-language stories: searching the whole headline is often too
-    # specific and can return only the original publisher.
+    """Free cross-source verification through Google News RSS."""
     title = target[0] if target else ""
     summary = target[2] if len(target) > 2 else ""
-
     raw_text = f"{title} {summary}".lower()
     words = re.findall(r"[а-яёa-z0-9]{4,}", raw_text)
-
-    stop = {
-        # Russian generic words
-        "российский","российская","российское","украинский","украинская",
-        "сообщил","сообщила","сообщили","заявил","заявила","заявили",
-        "после","перед","погиб","погибли","новости","стало","стали",
-        "который","которая","которые","сегодня","также","время","районе",
-        "области","новый","новые","this","that","with","from","after",
-        "following","reported","says","said","news","world","latest",
-        "military","official","officials","base","site","safe","insists",
-        "withdraws","withdraw","returning","returns","back","week",
-        # common English headline glue
-        "the","and","for","are","was","were","has","have","had","into",
-        "over","amid","about","near","their","they","them","been","being",
-        "british","american","united","states","kingdom"
-    }
-    words = [w for w in words if w not in stop]
-
-    # Keep distinctive terms, preserving their order.
+    stop = {"российский","российская","российское","украинский","украинская","сообщил","сообщила","сообщили","заявил","заявила","заявили","после","перед","погиб","погибли","новости","стало","стали","который","которая","которые","сегодня","также","время","районе","области","новый","новые","this","that","with","from","after","following","reported","reports","says","said","news","world","latest","military","official","officials","base","site","safe","insists","withdraws","withdraw","returning","returns","back","week","the","and","for","are","was","were","has","have","had","into","over","amid","about","near","their","they","them","been","being","british","american","united","states","kingdom"}
     distinctive = []
     for w in words:
-        if w not in distinctive:
+        if w not in stop and w not in distinctive:
             distinctive.append(w)
     distinctive = distinctive[:14]
-
-    queries = []
+    proper = re.findall(r"\b(?:RAF|Fairford|US|UK|No10|BBC|AP|Reuters|Trump|London|Ukraine|Russia|NATO|Iran|Israel)\b", title, re.I)
+    proper = list(dict.fromkeys(proper))
+    base_queries = []
+    if len(proper) >= 2:
+        base_queries.append(" ".join(proper[:5]))
     if distinctive:
-        # Broad entity/event search.
-        queries.append(" ".join(distinctive[:6]))
-        proper = re.findall(r"\b(?:RAF|Fairford|US|UK|No10|BBC|AP|Reuters|Trump|London|Ukraine|Russia)\b", title, re.I)
-        proper = list(dict.fromkeys(proper))
-        if len(proper) >= 2:
-            queries.insert(0, " ".join(proper[:4]))
+        base_queries.append(" ".join(distinctive[:6]))
         if len(distinctive) >= 4:
-            queries.append(" ".join(distinctive[:3] + distinctive[-3:]))
-        if len(distinctive) >= 6:
-            queries.append(" ".join(distinctive[1:7]))
-        # Search two highly distinctive pairs separately. This catches
-        # reports whose headline uses different wording.
-        if len(distinctive) >= 4:
-            queries.append(f'"{distinctive[0]}" "{distinctive[1]}"')
-            queries.append(f'"{distinctive[0]}" "{distinctive[-1]}"')
-
-    # Known-event fallback for stories where the title contains an unusual
-    # place/base/acronym but the summary is sparse.
+            base_queries.append(" ".join(distinctive[:3] + distinctive[-3:]))
     if title:
         title_terms = re.findall(r"[A-Z][A-Za-z0-9-]{2,}|[А-ЯЁ][А-ЯЁа-яё-]{3,}", title)
         if len(title_terms) >= 2:
-            queries.append(" ".join(title_terms[:5]))
-            if len(title_terms) >= 2:
-                queries.append(" ".join(title_terms[-5:]))
+            base_queries.append(" ".join(title_terms[:5]))
+
+    publishers = ["reuters.com","apnews.com","bbc.com","bbc.co.uk","news.sky.com","theguardian.com","itv.com","aljazeera.com","dw.com","france24.com"]
+    queries = []
+    for domain in publishers:
+        for q in base_queries[:2]:
+            queries.append((f"site:{domain} {q}", domain))
+    for q in base_queries[:4]:
+        queries.append((q, None))
 
     out, seen = [], set()
-    for query in queries[:6]:
-        url = "https://news.google.com/rss/search?q=" + requests.utils.quote(query) + "&hl=ru&gl=RU&ceid=RU:ru"
+    for query, expected_domain in queries:
+        if len(out) >= max_items:
+            break
+        url = "https://news.google.com/rss/search?q=" + requests.utils.quote(query) + "&hl=en&gl=US&ceid=US:en"
         try:
-            r = requests.get(url, timeout=12, headers={"User-Agent":"NOWLY-News-Agent/1.0"})
+            r = requests.get(url, timeout=10, headers={"User-Agent":"NOWLY-News-Agent/1.0"})
             r.raise_for_status()
             f = feedparser.parse(r.content)
             for e in f.entries[:8]:
@@ -742,14 +716,20 @@ def search_related_news(target, max_items=10):
                 sm = html.unescape(str(e.get("summary","") or "").strip())
                 sm = re.sub(r"<[^>]+>", " ", sm)
                 sm = re.sub(r"\s+", " ", sm).strip()
+                source_name = str((e.get("source") or {}).get("title", "")).strip()
+                if not t or not l or l == target[1]:
+                    continue
                 key = l or t.lower()
-                if t and l and l != target[1] and key not in seen:
-                    seen.add(key)
-                    out.append((t,l,sm))
-                    if len(out) >= max_items:
-                        break
-            if len(out) >= max_items:
-                break
+                if key in seen:
+                    continue
+                if expected_domain:
+                    low = (t + " " + l + " " + source_name).lower()
+                    if expected_domain not in low:
+                        continue
+                seen.add(key)
+                out.append((t,l,sm))
+                if len(out) >= max_items:
+                    break
         except Exception as e:
             print("RELATED SEARCH ERROR:", repr(e))
     return out[:max_items]
@@ -943,9 +923,9 @@ def process_news(chat, category="news", region=None):
             if key != link and key not in seen:
                 seen.add(key)
                 merged.append(item)
-        related = merged[:8]
+        related = merged[:10]
 
-        source_lines = [(title, link)] + [(x[0], x[1]) for x in related[:8]]
+        source_lines = [(title, link)] + [(x[0], x[1]) for x in related[:10]]
         material = "\n\n".join(
             f"[{i}] {x[0]}\nИсточник: {x[1]}\nОписание: {x[2][:500]}"
             for i, x in enumerate([selected[0]] + related[:8])
