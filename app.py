@@ -629,10 +629,17 @@ SHORT_SUMMARY — 1 короткое предложение, только фак
     for n, item in enumerate(selected, 1):
         title = item["title"] or str(item["summary"])[:100]
         summary = item["summary"].strip()
+        source_text = item["source"].get("text", "").strip()
+        # Never repeat the title as the description. If the calendar source
+        # itself contains only the title, omit the duplicate line entirely.
         if summary.casefold() == title.casefold() or title.casefold() in summary.casefold():
-            summary = item["source"].get("text", summary).strip()
+            remainder = source_text
+            if remainder.casefold().startswith(title.casefold()):
+                remainder = remainder[len(title):].lstrip(" .:—–-")
+            summary = remainder.strip()
         lines.append(f"🔹 {item['year']} — {title}")
-        lines.append(summary)
+        if summary:
+            lines.append(summary)
         lines.append("")
         buttons.append([{"text": f"🔎 Подробнее — {item['year']}", "callback_data": f"hist_more:{n}"}])
 
