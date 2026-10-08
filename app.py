@@ -681,25 +681,25 @@ def sanitize_legal_post(post, category, title="", summary="", evidence=""):
             low = sentence.lower().strip()
 
             # Legal posts must not invent purpose, expected effects or motives.
-    # Keep purpose/impact wording only when the source materials contain
-    # enough of the same concrete terms to support it.
-    legal_inference_phrases = (
-        "проект направлен на",
-        "разработка направлена на",
-        "документ направлен на",
-        "цель проекта",
-        "целью проекта",
-        "предназначен для",
-        "призван",
-        "позволит повысить",
-        "позволит обеспечить",
-        "обеспечит повышение",
-        "обеспечит безопасность",
-        "повысит эффективность",
-        "улучшит",
-    )
+            # Keep purpose/impact wording only when the source materials contain
+            # enough of the same concrete terms to support it.
+            legal_inference_phrases = (
+                "проект направлен на",
+                "разработка направлена на",
+                "документ направлен на",
+                "цель проекта",
+                "целью проекта",
+                "предназначен для",
+                "призван",
+                "позволит повысить",
+                "позволит обеспечить",
+                "обеспечит повышение",
+                "обеспечит безопасность",
+                "повысит эффективность",
+                "улучшит",
+            )
 
-    # Never let the editor turn a draft into an adopted/approved act
+            # Never let the editor turn a draft into an adopted/approved act
             # or invent that the draft will be reviewed, approved or become
             # mandatory. Keep such wording only when the source explicitly
             # contains the same concrete claim.
