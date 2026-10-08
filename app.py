@@ -712,6 +712,7 @@ def search_related_news(target, max_items=8):
         queries.append((q, None))
 
     out, seen = [], set()
+    publisher_counts = {}
     for query, expected_source in queries:
         if len(out) >= max_items:
             break
@@ -753,6 +754,11 @@ def search_related_news(target, max_items=8):
                         continue
                 seen.add(key)
                 out.append((t,l,sm))
+                if expected_source:
+                    publisher_counts[expected_source[1]] = publisher_counts.get(expected_source[1], 0) + 1
+                    # Keep at least some room for other publishers (e.g. NPR after BBC).
+                    if publisher_counts[expected_source[1]] >= 2:
+                        break
                 if len(out) >= max_items:
                     break
         except Exception as e:
