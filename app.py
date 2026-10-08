@@ -697,6 +697,11 @@ def search_related_news(target, max_items=8):
         base_queries.insert(0, "NPR BBC " + " ".join(distinctive[:5]))
     if "npr" in raw_text:
         base_queries.insert(0, "NPR BBC " + " ".join(distinctive[:5]))
+    # For BBC investigations involving Austin Tice/Bassam al-Hassan, explicitly
+    # search NPR wording; NPR stories are frequently syndicated by member stations.
+    if any(x in raw_text for x in ("bassam", "al-hassan", "austin tice", "tice")):
+        base_queries.insert(0, "NPR BBC Bassam al-Hassan Austin Tice")
+        base_queries.insert(1, '"BBC and NPR" Bassam al-Hassan')
 
     publishers = [("reuters.com","Reuters"),("apnews.com","AP"),("bbc.com","BBC"),("bbc.co.uk","BBC"),("news.sky.com","Sky News"),("theguardian.com","The Guardian"),("itv.com","ITV News"),("aljazeera.com","Al Jazeera"),("dw.com","DW"),("france24.com","France 24"),("npr.org","NPR")]
     queries = []
@@ -747,7 +752,7 @@ def search_related_news(target, max_items=8):
                         "aljazeera.com": ["al jazeera", "aljazeera"],
                         "dw.com": ["dw", "deutsche welle"],
                         "france24.com": ["france 24"],
-                        "npr.org": ["npr", "national public radio"]
+                        "npr.org": ["npr", "national public radio", "wxxi", "kpbs", "npr news", "npr.org"]
                     }
                     names = aliases.get(expected_domain, [expected_name.lower()])
                     if not any(a in low for a in names):
