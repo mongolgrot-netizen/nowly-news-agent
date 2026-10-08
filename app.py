@@ -426,6 +426,41 @@ def _history_source_lines(ev):
         lines.append(f"Рувики: {rw['url']}")
     return "\n".join(dict.fromkeys(lines))
 
+def _history_clean_ai(text):
+    """Remove Markdown links that the model may add despite instructions."""
+    if not text:
+        return ""
+    text = re.sub(r"\[([^\]]+)\]\((https?://[^)]+)\)", r"\1: \2", text)
+    text = re.sub(r"\[?(https?://[^\s\]\)]+)\]?", r"\1", text)
+    return text.strip()
+
+def _history_wiki_extract(title):
+    """Fetch the actual free Wikipedia article extract for a selected event."""
+    if not title:
+        return ""
+    try:
+        url = "https://ru.wikipedia.org/w/api.php"
+        params = {
+            "action": "query",
+            "prop": "extracts|info",
+            "titles": title,
+            "explaintext": 1,
+            "exchars": 9000,
+            "inprop": "url",
+            "format": "json",
+            "utf8": 1
+        }
+        r = requests.get(url, params=params, timeout=20,
+                         headers={"User-Agent":"NOWLY-History/1.0"})
+        if not r.ok:
+            return ""
+        pages = r.json().get("query", {}).get("pages", {})
+        obj = next(iter(pages.values()), {})
+        return (obj.get("extract") or "").strip()[:9000]
+    except Exception as ex:
+        print("WIKI HISTORY EXTRACT ERROR:", repr(ex))
+        return ""
+
 def _history_scope_text(scope, region=None):
     if scope == "russia":
         return (
@@ -700,6 +735,17 @@ def history_detail(chat, number):
 
     ev = item["source"]
     source_text = _history_source_lines(ev)
+    wiki_extract = ""
+    page_title = ((ev.get("pages") or [{}])[0].get("title") or "").strip()
+    if page_title and not re.fullmatch(r"\d{4}\s*год(?:а)?", page_title, re.I):
+        wiki_extract = _history_wiki_extract(page_title)
+    rw_extract = ((ev.get("ruwiki") or {}).get("extract") or "").strip()
+    evidence = {
+        "calendar_event": ev.get("text", ""),
+        "wikipedia_article_extract": wiki_extract,
+        "ruwiki_article_extract": rw_extract,
+        "sources": source_text
+    }
     detail_prompt = f"""Ты исторический редактор Telegram-канала NOWLY.
 Подготовь подробный материал только по ОДНОМУ событию.
 
@@ -710,6 +756,10 @@ def history_detail(chat, number):
 
 КРИТИЧЕСКОЕ ПРАВИЛО: НЕ РАСШИРЯЙ ФАКТЫ.
 Используй только сведения из блока «ИСХОДНЫЕ ДАННЫЕ» ниже.
+Если календарная запись содержит одну короткую фразу, используй текст
+энциклопедической статьи из блока Wikipedia/Ruwiki для раскрытия события.
+Не ограничивайся повторением календарной фразы, если статья содержит
+дополнительные подтверждённые сведения.
 Нельзя добавлять из памяти модели причины, участников, цифры, последствия,
 названия организаций, оценки или детали, которых там нет.
 Если сведений мало — честно дай короткий материал, а не выдумывай недостающее.
@@ -739,7 +789,7 @@ def history_detail(chat, number):
 Не добавляй служебных предупреждений.
 
 ИСХОДНЫЕ ДАННЫЕ:
-{json.dumps(ev, ensure_ascii=False)[:12000]}
+{json.dumps(evidence, ensure_ascii=False)[:22000]}
 """
 
     try:
@@ -752,6 +802,7 @@ def history_detail(chat, number):
     # returning raw Markdown links that Telegram displays literally.
     if detail:
         detail = re.sub(r"\n?Источники:\s*[\s\S]*$", "", detail, flags=re.I).strip()
+        detail = _history_clean_ai(detail)
         if source_text:
             detail += "\n\nИсточники:\n" + source_text
 
