@@ -728,24 +728,15 @@ def sanitize_legal_post(post, category, title="", summary="", evidence=""):
             if not is_blocked and any(p in low for p in legal_inference_phrases):
                 is_blocked = True
 
-            # Generic predictive wording is also unsafe for legal news unless
-            # the source itself contains a very close formulation.
-            # Do not publish model-generated expectations/predictions about a draft.
-            # Even if a source mentions a future step, the safe NOWLY wording is to
-            # state only the current document status unless the exact claim is quoted.
-            if (
-                not is_blocked
-                and any(k in low for k in ("ожидается", "предполагается", "планируется"))
-                and any(k in low for k in ("проект", "постанов", "документ"))
-            ):
+            # Any expectation/forecast about what will happen next is removed.
+            # It is safer to omit a sentence than to turn a draft into a prediction.
+            if any(k in low for k in ("ожидается", "предполагается", "планируется")):
                 is_blocked = True
 
             if is_blocked:
-                normalized = re.sub(r"\\s+", " ", low).strip()
-                # Require the actual source text to contain the same sentence
-                # (or a substantial substring) before allowing it through.
-                if normalized not in source_text and low not in source_text:
-                    continue
+                # Blocked editorial inferences are never restored from the source
+                # automatically. The AI may have combined source facts into a new claim.
+                continue
 
             kept.append(sentence)
 
