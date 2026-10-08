@@ -1817,6 +1817,36 @@ def handle_update(u):
         if ADMIN_ID and str(chat) != str(ADMIN_ID):
             return
 
+        if q["data"].startswith("hist_more:"):
+            number = q["data"].split(":", 1)[1]
+            tg("answerCallbackQuery", {"callback_query_id": q["id"], "text": "Открываю подробный материал…"})
+            threading.Thread(target=history_detail, args=(chat, number), daemon=True).start()
+            return
+
+        if q["data"] == "hist_back":
+            tg("answerCallbackQuery", {"callback_query_id": q["id"], "text": "Возвращаю список событий"})
+            cache = HISTORY_CACHE.get(str(chat))
+            if cache:
+                scope = cache.get("scope", "world")
+                region = cache.get("region")
+                # Rebuild the concise digest from the cached facts without another AI call.
+                scope_title = "🇷🇺 Россия" if scope == "russia" else ("🌍 Мир" if scope == "world" else f"🗺 {region}")
+                lines = [f"📅 ЭТОТ ДЕНЬ В ИСТОРИИ — {cache.get('date', '')}", scope_title, ""]
+                buttons = []
+                for n, item in enumerate(cache.get("events", []), 1):
+                    lines.append(f"🔹 {item['year']} — {item['title']}")
+                    lines.append(item["summary"].strip())
+                    lines.append("")
+                    buttons.append([{"text": f"🔎 Подробнее — {item['year']}", "callback_data": f"hist_more:{n}"}])
+                lines.append("Нажми «🔎 Подробнее», чтобы открыть полный материал по выбранному событию.")
+                send(chat, "\n".join(lines).strip(), buttons + [[
+                    {"text": "✅ Опубликовать", "callback_data": "pub"},
+                    {"text": "❌ Отклонить", "callback_data": "no"}
+                ]])
+            else:
+                send(chat, "⚠️ Список событий больше не доступен. Запусти «Этот день в истории» заново.")
+            return
+
         if q["data"] == "pub":
             text = q["message"]["text"]
             result = tg("sendMessage", {
