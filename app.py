@@ -1015,11 +1015,44 @@ def history_detail(chat, number):
     else:
         # Если AI не дал качественную редактуру, делаем читаемую версию
         # непосредственно из проверенного источника.
-        # Безопасный fallback: только предложения из проверенного источника.
-        parts = ["📌 Что произошло", fallback_main or "Подробное описание события в доступном источнике отсутствует."]
-        if fallback_later:
-            parts.extend(["", "📍 Что было дальше", fallback_later])
-        detail_body = "\n".join(parts)
+        # Безопасный fallback: только предложения из проверенного источника,
+        # но с той же редакционной структурой, что и AI-версия.
+        source_sentences = safe[:10]
+
+        def build_fallback(sentences):
+            if not sentences:
+                return "📌 Что произошло\\n\\nПодробное описание события в доступном источнике отсутствует."
+
+            # Первые предложения описывают само событие. Последующие,
+            # если в них есть признаки продолжения/последствий, выносим отдельно.
+            later_markers = (
+                "после", "затем", "впоследствии", "позднее", "вскоре",
+                "ремонт", "восстанов", "возобнов", "заявил", "заявила",
+                "заявили", "начал", "началась", "начались"
+            )
+
+            split_at = len(sentences)
+            if len(sentences) >= 4:
+                for i in range(2, len(sentences)):
+                    if any(m in sentences[i].casefold() for m in later_markers):
+                        split_at = i
+                        break
+
+            main_sentences = sentences[:split_at]
+            later_sentences = sentences[split_at:]
+
+            out = ["📌 Что произошло"]
+            for i in range(0, len(main_sentences), 2):
+                out.append(" ".join(main_sentences[i:i + 2]))
+
+            if later_sentences:
+                out.append("📍 Что было дальше")
+                for i in range(0, len(later_sentences), 2):
+                    out.append(" ".join(later_sentences[i:i + 2]))
+
+            return "\n\n".join(out)
+
+        detail_body = build_fallback(source_sentences)
 
     display_title = re.sub(r"[.!?]+$", "", str(item["title"]).strip())
     detail = f"📖 {item['year']} — {display_title}\n\n{detail_body}".strip()
