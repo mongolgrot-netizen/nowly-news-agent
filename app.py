@@ -665,6 +665,35 @@ def story_relevance(target, item):
     if overlap>=3: return 3
     return 0
 
+def sanitize_legal_post(post, category, title="", summary="", evidence=""):
+    """Remove unsupported legal-news predictions that the model may hallucinate."""
+    if not post or category not in ("russia", "laws", "kremlin", "russia_tech"):
+        return post
+    source_text = f"{title} {summary} {evidence}".lower()
+    lines = str(post).splitlines()
+    cleaned = []
+    for line in lines:
+        stripped = line.strip()
+        low = stripped.lower()
+        unsupported_prediction = (
+            "проект будет рассмотрен" in low
+            or "проект будет утвержден" in low
+            or "проект будет принят" in low
+            or "проект будет одобрен" in low
+            or "проект рассмотрят" in low
+            or "проект утвердят" in low
+            or "проект примут" in low
+            or "проект одобрят" in low
+        )
+        if unsupported_prediction:
+            # Keep the sentence only if the same formulation is actually present
+            # in the source material/evidence.
+            if low not in source_text:
+                continue
+        cleaned.append(line)
+    return "\n".join(cleaned).strip()
+
+
 def related_items(target, items, max_items=5):
     # Compare title + summary, not title only.
     text_a = f"{target[0]} {target[2]}".lower()
@@ -1239,6 +1268,7 @@ def process_news(chat, category="news", region=None):
         post = str(data.get("post","")).strip()
         post = re.sub(r"\[\s*(https?://[^\]\s]+)\s*\]", r"\1", post)
         post = post.replace("\\&", "&")
+        post = sanitize_legal_post(post, category, title, summary, evidence_text)
         if not post:
             # Never expose a foreign-language RSS title in a fallback draft.
             fallback_prompt = f"""Перепиши этот материал как короткую новость на русском языке.
