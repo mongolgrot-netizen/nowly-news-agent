@@ -1312,11 +1312,38 @@ def _process_news(chat, category="news", region=None):
             m = re.search(r"\[Редакция:\s*([^\]]+)\]", str(x[2]))
             if m:
                 ru_publishers.add(m.group(1).strip().lower())
-        if category in ("russia", "laws", "kremlin", "russia_tech") and len(ru_publishers) >= 2:
+        # For Russian federal/legal stories, confirmation must be based on
+        # genuinely distinct publishers, not duplicate Google News entries
+        # from the same outlet or publisher names appearing in the headline.
+        verified_ru_publishers = set()
+        ru_domain_map = {
+            "interfax.ru": "Интерфакс",
+            "tass.ru": "ТАСС",
+            "ria.ru": "РИА Новости",
+            "rbc.ru": "РБК",
+            "kommersant.ru": "Коммерсантъ",
+            "vedomosti.ru": "Ведомости",
+            "garant.ru": "ГАРАНТ",
+            "consultant.ru": "КонсультантПлюс",
+            "cbr.ru": "Банк России",
+            "government.ru": "Правительство РФ",
+            "kremlin.ru": "Кремль",
+            "duma.gov.ru": "Госдума",
+        }
+        for x in related:
+            txt = f"{x[0]} {x[1]} {x[2]}".lower()
+            marker = re.search(r"\[редакция:\s*([^\]]+)\]", txt)
+            if marker:
+                verified_ru_publishers.add(marker.group(1).strip().lower())
+            for domain, publisher in ru_domain_map.items():
+                if domain in txt:
+                    verified_ru_publishers.add(publisher.lower())
+
+        if category in ("russia", "laws", "kremlin", "russia_tech") and len(verified_ru_publishers) >= 2:
             status = "confirmed"
             recommendation = "publish"
-            data["reason"] = "Материал подтверждён несколькими независимыми российскими редакциями."
-        elif category in ("russia", "laws", "kremlin", "russia_tech") and len(ru_publishers) < 2:
+            data["reason"] = "Материал подтверждён несколькими независимыми российскими источниками."
+        elif category in ("russia", "laws", "kremlin", "russia_tech") and len(verified_ru_publishers) < 2:
             # Do not let the LLM call a Russian federal story "confirmed"
             # when the deterministic source set contains only one publisher.
             # A single outlet can be a primary/officially documented source,
