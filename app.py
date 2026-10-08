@@ -1186,7 +1186,7 @@ def process_news(chat, category="news", region=None):
             recommendation = "publish"
             data["reason"] = "Материал подтверждён несколькими независимыми крупными СМИ."
         explicit_publishers = set()
-        publisher_aliases = ("bbc", "reuters", "ap", "npr", "the guardian", "dw", "al jazeera", "france 24")
+        publisher_aliases = ("bbc", "reuters", "ap", "npr", "the guardian", "dw", "al jazeera", "france 24", "интерфакс", "interfax", "тасс", "ria", "риа новости", "рбк", "rbc", "коммерсант", "kommersant", "ведомости", "garant", "гарант", "consultant", "консультант")
         for x in related:
             txt = f"{x[0]} {x[1]} {x[2]}".lower()
             for alias in publisher_aliases:
@@ -1196,6 +1196,15 @@ def process_news(chat, category="news", region=None):
             status = "confirmed"
             recommendation = "publish"
             data["reason"] = "Материал подтверждён несколькими независимыми крупными СМИ."
+        ru_publishers = set()
+        for x in direct_ru:
+            m = re.search(r"\[Редакция:\s*([^\]]+)\]", str(x[2]))
+            if m:
+                ru_publishers.add(m.group(1).strip().lower())
+        if category in ("russia", "laws", "kremlin", "russia_tech") and len(ru_publishers) >= 2:
+            status = "confirmed"
+            recommendation = "publish"
+            data["reason"] = "Материал подтверждён несколькими независимыми российскими редакциями."
         if joint_publishers:
             status = "joint_investigation"
             recommendation = "publish"
@@ -1210,7 +1219,7 @@ def process_news(chat, category="news", region=None):
         }
         rec = "🟢 рекомендовано к публикации" if recommendation == "publish" else "🔴 лучше НЕ публиковать"
         source_names = []
-        allowed_names = ('BBC', 'Reuters', 'AP', 'NPR', 'The Guardian', 'DW', 'Al Jazeera', 'France 24', 'CNN', 'MIT')
+        allowed_names = ('BBC', 'Reuters', 'AP', 'NPR', 'The Guardian', 'DW', 'Al Jazeera', 'France 24', 'CNN', 'MIT', 'Interfax', 'ТАСС', 'РИА Новости', 'РБК', 'Коммерсантъ', 'Ведомости', 'ГАРАНТ', 'КонсультантПлюс')
         for x in related:
             m = re.search(r"\[Редакция:\s*([^\]]+)\]", str(x[2]))
             if m and any(a.lower() in m.group(1).lower() for a in allowed_names) and m.group(1) not in source_names:
