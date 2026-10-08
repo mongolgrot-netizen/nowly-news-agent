@@ -827,6 +827,14 @@ def history_detail(chat, number):
         "согласно заявлениям местных властей, проезд грузовых автомобилей запрещён",
     )
     safe = [s for s in sentences if not any(x in s.casefold() for x in bad)]
+    safe = [
+        re.sub(
+            r"(?i)^Ответственность за взрыв взяла на себя украинская сторона\.?$",
+            "Украинская сторона заявила о своей ответственности за взрыв.",
+            s
+        )
+        for s in safe
+    ]
 
     # Не даём статье разрастись: Telegram должен получить насыщенный,
     # но читаемый материал.
@@ -857,8 +865,11 @@ def history_detail(chat, number):
     what = trim_block(main, 1550)
     later_text = trim_block(later, 1050)
 
+    # Нормализуем заголовок для Telegram и аккуратно атрибутируем
+    # спорные заявления, не выдавая их за установленный факт.
+    display_title = re.sub(r"[.!?]+$", "", str(item["title"]).strip())
     detail_parts = [
-        f"📖 {item['year']} — {item['title']}",
+        f"📖 {item['year']} — {display_title}",
         "",
         "📌 Главное",
         what or "Подробное описание события в доступном источнике отсутствует."
