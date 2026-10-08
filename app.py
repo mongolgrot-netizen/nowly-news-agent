@@ -414,40 +414,21 @@ def ruwiki_search_event(title):
         print("RUWIKI HISTORY ERROR:",repr(e))
         return None
 
-def history_day(chat, scope="world", region=None):
-    from datetime import datetime
+HISTORY_CACHE = {}  # chat_id -> {"date": str, "scope": str, "region": str|None, "events": list, "created": float}
 
-    now = datetime.now()
-    day, month = now.day, now.month
-    date_label = f"{day}.{month:02d}"
+def _history_source_lines(ev):
+    lines = []
+    for p in ev.get("pages") or []:
+        if p.get("url"):
+            lines.append(f"Wikipedia: {p['url']}")
+    rw = ev.get("ruwiki") or {}
+    if rw.get("url"):
+        lines.append(f"Рувики: {rw['url']}")
+    return "\n".join(dict.fromkeys(lines))
 
-    # Wikimedia/Wikipedia provides the calendar of events. We deliberately
-    # keep the source data separate from the editorial text so the AI cannot
-    # silently invent events outside the selected geographic scope.
-    lang = "ru" if scope != "world" else "en"
-    urls = [
-        f"https://api.wikimedia.org/feed/v1/wikipedia/{lang}/onthisday/events/{month:02d}/{day:02d}",
-        f"https://{lang}.wikipedia.org/api/rest_v1/feed/onthisday/events/{month:02d}/{day:02d}"
-    ]
-
-    events = []
-    for url in urls:
-        try:
-            rr = requests.get(url, timeout=20, headers={"User-Agent": "NOWLY/1.0"})
-            if rr.ok:
-                payload = rr.json()
-                events = payload.get("events", [])
-                if events:
-                    break
-        except Exception as ex:
-            print("HISTORY API:", repr(ex))
-
-    if not events:
-        send(chat, f"📅 ЭТОТ ДЕНЬ В ИСТОРИИ — {date_label}\n\nНе удалось получить исторические события за сегодняшнюю дату.")
-        return
-
+def _history_scope_text(scope, region=None):
     if scope == "russia":
-        scope_text = (
+        return (
             "СТРОГО РОССИЯ. Разрешены только события, которые непосредственно "
             "произошли на территории России или были непосредственной частью истории "
             "Российской империи, РСФСР, СССР или Российской Федерации. "
@@ -455,14 +436,42 @@ def history_day(chat, scope="world", region=None):
             "участвовал гражданин России. Международное событие допустимо только "
             "если Россия/СССР является непосредственной стороной события."
         )
-    elif scope == "region":
-        scope_text = (
+    if scope == "region":
+        return (
             f"СТРОГО РЕГИОН: {region}. Разрешены только события, непосредственно "
             f"связанные с {region}. Не включай общероссийские или мировые события "
             "без прямой связи с этим регионом."
         )
-    else:
-        scope_text = "ВЕСЬ МИР. Выбирай исторически значимые события разных стран и эпох."
+    return "ВЕСЬ МИР. Выбирай исторически значимые события разных стран и эпох."
+
+def _history_get_events(month, day, scope):
+    lang = "ru" if scope != "world" else "en"
+    urls = [
+        f"https://api.wikimedia.org/feed/v1/wikipedia/{lang}/onthisday/events/{month:02d}/{day:02d}",
+        f"https://{lang}.wikipedia.org/api/rest_v1/feed/onthisday/events/{month:02d}/{day:02d}"
+    ]
+    for url in urls:
+        try:
+            rr = requests.get(url, timeout=20, headers={"User-Agent": "NOWLY/1.0"})
+            if rr.ok:
+                events = rr.json().get("events", [])
+                if events:
+                    return events
+        except Exception as ex:
+            print("HISTORY API:", repr(ex))
+    return []
+
+def history_day(chat, scope="world", region=None):
+    from datetime import datetime
+
+    now = datetime.now()
+    day, month = now.day, now.month
+    date_label = f"{day}.{month:02d}"
+    events = _history_get_events(month, day, scope)
+
+    if not events:
+        send(chat, f"📅 ЭТОТ ДЕНЬ В ИСТОРИИ — {date_label}\n\nНе удалось получить исторические события за сегодняшнюю дату.")
+        return
 
     candidates = []
     for ev in events[:40]:
@@ -471,118 +480,198 @@ def history_day(chat, scope="world", region=None):
         pages = ev.get("pages") or []
         if not text_ev:
             continue
-
         page_refs = []
         for p in pages[:2]:
+            if not isinstance(p, dict):
+                continue
             title = p.get("normalizedtitle") or p.get("title") or ""
-            url = p.get("content_urls", {}).get("desktop", {}).get("page") if isinstance(p, dict) else None
+            url = p.get("content_urls", {}).get("desktop", {}).get("page") or ""
             if title or url:
-                page_refs.append({"title": title, "url": url or ""})
-
-        candidates.append({
-            "year": year,
-            "text": text_ev[:1500],
-            "pages": page_refs
-        })
+                page_refs.append({"title": title, "url": url})
+        candidates.append({"year": year, "text": text_ev[:1500], "pages": page_refs})
 
     if not candidates:
         send(chat, f"📅 ЭТОТ ДЕНЬ В ИСТОРИИ — {date_label}\n\nДля этой даты не найдено подходящих событий.")
         return
 
-    # Add a second free Russian-language source for candidate verification.
     enriched = []
     for ev in candidates[:24]:
         query_title = ev["pages"][0]["title"] if ev.get("pages") and ev["pages"][0].get("title") else ev["text"]
-        rw = ruwiki_search_event(query_title)
-        ev["ruwiki"] = rw
+        ev["ruwiki"] = ruwiki_search_event(query_title)
         enriched.append(ev)
 
-    prompt = f"""Ты старший исторический редактор Telegram-канала NOWLY.
-Сегодня {date_label}. Подготовь ПОДРОБНЫЙ материал «Этот день в истории».
-Охват: {scope_text}
+    scope_text = _history_scope_text(scope, region)
 
-КРИТИЧЕСКАЯ ФИЛЬТРАЦИЯ:
-1. Каждое событие произошло именно {date_label} в указанном году.
-2. НЕЛЬЗЯ включать событие только потому, что оно известно или связано с человеком из выбранной страны/региона.
-3. Для режима Россия исключи события, произошедшие в Финляндии, Великобритании, США, Афганистане, Пакистане, Италии и любых других странах, если Россия/СССР не является непосредственной стороной события.
-4. Для режима региона событие должно иметь прямую географическую связь с выбранным регионом.
-5. Если после строгой фильтрации остаётся мало событий, покажи меньше. НЕЛЬЗЯ заполнять список нерелевантными событиями.
-6. Выбери 5–8 самых значимых событий. Старайся охватить разные эпохи.
-7. Не включай обычные дни рождения и смерти людей как самостоятельные события.
-8. Не объединяй разные события в один пункт.
+    # First pass: only select events and write short summaries. The model is
+    # explicitly forbidden to add facts beyond the supplied source records.
+    digest_prompt = f"""Ты исторический редактор Telegram-канала NOWLY.
+Дата: {date_label}. Охват: {scope_text}
 
-ПРОВЕРКА ФАКТОВ:
-9. Wikimedia/Wikipedia используется для календарной даты события.
-10. Рувики используется как дополнительный источник для проверки и расширения контекста.
-11. Не добавляй причины, числа погибших, имена участников, последствия или другие детали, которых нет в предоставленных источниках.
-12. Если источники расходятся, прямо укажи это коротко.
-13. Не выдавай предположение или позднейшую интерпретацию за установленный факт.
-14. Не копируй большие фрагменты источников дословно — пересказывай своими словами.
-15. Для каждого события используй ссылку на соответствующую статью, если она есть.
+Твоя задача — выбрать 5–8 наиболее значимых событий из ПРЕДОСТАВЛЕННОГО списка.
+Если строгий фильтр оставляет меньше событий — выбери меньше. Нельзя заполнять
+список нерелевантными событиями.
 
-ФОРМАТ КАЖДОГО СОБЫТИЯ:
-🔹 {year} — название события
+ЖЁСТКИЕ ПРАВИЛА:
+1. Событие должно относиться именно к указанной дате и году из записи.
+2. Не включай дни рождения или смерти как самостоятельные события.
+3. Не добавляй ни одного факта, которого нет в записи календаря или указанной статье.
+4. Не придумывай участников, причины, последствия, цифры, места и оценки.
+5. Не используй общие знания модели для расширения события.
+6. Для России и региона соблюдай географический фильтр буквально.
+7. Выбирай разные эпохи, если есть достоверный выбор.
+8. Никаких служебных комментариев.
 
-Что произошло:
-2–3 содержательных предложения с самим событием.
+ОТВЕТ — строго по одной строке на событие:
+INDEX|YEAR|TITLE|SHORT_SUMMARY
 
-Контекст:
-1–2 предложения о причинах или предыстории, только если они подтверждены.
+INDEX — номер записи в исходном списке, начиная с 1.
+SHORT_SUMMARY — 1–2 коротких предложения, только факты из исходных данных.
+Не используй символ | внутри полей.
+Не добавляй нумерацию, Markdown или другие строки.
 
-Участники:
-Основные люди, организации или стороны, только если они подтверждены.
-
-Итоги и значение:
-1–2 предложения о результате и историческом значении.
-
-Источники:
-Рувики: URL
-Wikipedia/Wikimedia: URL
-
-Не оставляй пустые разделы. Если достоверного контекста нет, просто не добавляй этот раздел.
-
-ОБЩИЙ ФОРМАТ:
-📅 ЭТОТ ДЕНЬ В ИСТОРИИ — {date_label}
-
-🔹 ...
-...
-
-📚 Проверенные источники:
-перечень URL использованных материалов
-
-Пиши естественным русским языком. Без Markdown-разметки, таблиц и служебных сообщений.
-Не добавляй фразу «материал требует ручной проверки».
-Не добавляй предупреждение о том, что AI-редактор недоступен.
-Не добавляй события, которые не проходят географический фильтр.
-
-Данные календаря и дополнительные материалы:
+ИСХОДНЫЕ ДАННЫЕ:
 {json.dumps(enriched, ensure_ascii=False)[:50000]}
 """
 
+    selected = []
     try:
-        post = groq(prompt, 0.15, 3200).strip()
-        if not post:
-            raise ValueError("empty history response")
+        raw = groq(digest_prompt, 0.05, 1800).strip()
+        for line in raw.splitlines():
+            parts = [p.strip() for p in line.split("|", 3)]
+            if len(parts) != 4:
+                continue
+            try:
+                idx = int(parts[0])
+            except ValueError:
+                continue
+            if idx < 1 or idx > len(enriched):
+                continue
+            if any(x["source_index"] == idx for x in selected):
+                continue
+            selected.append({
+                "source_index": idx,
+                "year": parts[1] or enriched[idx - 1]["year"],
+                "title": parts[2],
+                "summary": parts[3],
+                "source": enriched[idx - 1]
+            })
+            if len(selected) >= 8:
+                break
     except Exception as ex:
-        print("HISTORY AI:", repr(ex))
-        # Safe fallback: show only raw calendar events. No fake details and no
-        # misleading "AI unavailable" service message.
-        raw_items = []
-        for x in candidates[:8]:
-            raw_items.append(f"🔹 {x['year']} — {x['text']}")
-        post = (
-            f"📅 ЭТОТ ДЕНЬ В ИСТОРИИ — {date_label}\n\n"
-            + "\n\n".join(raw_items)
-            + "\n\n📚 Источник: Wikimedia / Wikipedia."
+        print("HISTORY DIGEST AI:", repr(ex))
+
+    if not selected:
+        # Safe fallback: no AI-created facts. Show raw calendar entries only.
+        for idx, ev in enumerate(enriched[:8], 1):
+            selected.append({
+                "source_index": idx,
+                "year": ev["year"],
+                "title": ev["text"][:120],
+                "summary": ev["text"],
+                "source": ev
+            })
+
+    HISTORY_CACHE[str(chat)] = {
+        "date": date_label,
+        "scope": scope,
+        "region": region,
+        "events": selected,
+        "created": time.time()
+    }
+
+    scope_title = "🇷🇺 Россия" if scope == "russia" else ("🌍 Мир" if scope == "world" else f"🗺 {region}")
+    lines = [f"📅 ЭТОТ ДЕНЬ В ИСТОРИИ — {date_label}", scope_title, ""]
+    buttons = []
+    for n, item in enumerate(selected, 1):
+        title = item["title"] or str(item["summary"])[:100]
+        summary = item["summary"].strip()
+        lines.append(f"🔹 {item['year']} — {title}")
+        lines.append(summary)
+        lines.append("")
+        buttons.append([{"text": f"🔎 Подробнее — {item['year']}", "callback_data": f"hist_more:{n}"}])
+
+    lines.append("Нажми «🔎 Подробнее», чтобы открыть полный материал по выбранному событию.")
+    send(
+        chat,
+        "\n".join(lines).strip(),
+        buttons + [[
+            {"text": "✅ Опубликовать", "callback_data": "pub"},
+            {"text": "❌ Отклонить", "callback_data": "no"}
+        ]]
+    )
+
+def history_detail(chat, number):
+    cache = HISTORY_CACHE.get(str(chat))
+    if not cache:
+        send(chat, "⚠️ Материал истории больше не доступен. Запусти «Этот день в истории» заново.")
+        return
+
+    try:
+        item = cache["events"][int(number) - 1]
+    except (ValueError, IndexError, TypeError):
+        send(chat, "⚠️ Не удалось найти выбранное историческое событие.")
+        return
+
+    ev = item["source"]
+    source_text = _history_source_lines(ev)
+    detail_prompt = f"""Ты исторический редактор Telegram-канала NOWLY.
+Подготовь подробный материал только по ОДНОМУ событию.
+
+Дата: {cache["date"]}
+Охват: {_history_scope_text(cache["scope"], cache.get("region"))}
+Год: {item["year"]}
+Название: {item["title"]}
+
+КРИТИЧЕСКОЕ ПРАВИЛО: НЕ РАСШИРЯЙ ФАКТЫ.
+Используй только сведения из блока «ИСХОДНЫЕ ДАННЫЕ» ниже.
+Нельзя добавлять из памяти модели причины, участников, цифры, последствия,
+названия организаций, оценки или детали, которых там нет.
+Если сведений мало — честно дай короткий материал, а не выдумывай недостающее.
+Не выдавай историческую интерпретацию за установленный факт.
+
+ФОРМАТ:
+📖 {item["year"]} — {item["title"]}
+
+Что произошло:
+2–4 абзаца с подтверждёнными фактами.
+
+Контекст:
+только если он прямо подтверждён исходными данными.
+
+Факты:
+только конкретные сведения из исходных данных, без дополнений.
+
+Итог:
+только подтверждённый результат события; если его нет в источниках, раздел не добавляй.
+
+Источники:
+{source_text}
+
+Не используй Markdown-разметку. Не придумывай URL.
+Не добавляй служебных предупреждений.
+
+ИСХОДНЫЕ ДАННЫЕ:
+{json.dumps(ev, ensure_ascii=False)[:12000]}
+"""
+
+    try:
+        detail = groq(detail_prompt, 0.05, 2200).strip()
+    except Exception as ex:
+        print("HISTORY DETAIL AI:", repr(ex))
+        detail = ""
+
+    if not detail:
+        detail = (
+            f"📖 {item['year']} — {item['title']}\n\n"
+            f"{ev['text']}\n\n"
+            f"Источники:\n{source_text or 'Wikimedia / Wikipedia'}"
         )
 
-    # Telegram has a 4096-character message limit. Split only at paragraph
-    # boundaries so a detailed historical entry is not cut in the middle.
     chunks = []
-    rest = post.strip()
+    rest = detail.strip()
     while len(rest) > 3900:
         cut = rest.rfind("\n\n", 0, 3900)
-        if cut < 1600:
+        if cut < 1200:
             cut = rest.rfind("\n", 0, 3900)
         if cut < 1:
             cut = 3900
@@ -591,20 +680,12 @@ Wikipedia/Wikimedia: URL
     if rest:
         chunks.append(rest)
 
-    # The publication button is attached only to the final part, so pressing
-    # Publish sends the complete article to the NOWLY channel as one editorial
-    # action. Earlier parts remain visible to the editor but have no duplicate
-    # publication button.
-    for part in chunks[:-1]:
+    for part in chunks:
         send(chat, part)
-    send(
-        chat,
-        chunks[-1],
-        [[
-            {"text": "✅ Опубликовать", "callback_data": "pub"},
-            {"text": "❌ Отклонить", "callback_data": "no"}
-        ]]
-    )
+
+    send(chat, "↩️ Вернуться к списку событий", [[
+        {"text": "↩️ К событиям", "callback_data": "hist_back"}
+    ]])
 
 def world_keyboard():
     return [
