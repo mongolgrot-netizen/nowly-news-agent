@@ -673,24 +673,27 @@ def sanitize_legal_post(post, category, title="", summary="", evidence=""):
     lines = str(post).splitlines()
     cleaned = []
     for line in lines:
-        stripped = line.strip()
-        low = stripped.lower()
-        unsupported_prediction = (
-            "проект будет рассмотрен" in low
-            or "проект будет утвержден" in low
-            or "проект будет принят" in low
-            or "проект будет одобрен" in low
-            or "проект рассмотрят" in low
-            or "проект утвердят" in low
-            or "проект примут" in low
-            or "проект одобрят" in low
-        )
-        if unsupported_prediction:
-            # Keep the sentence only if the same formulation is actually present
-            # in the source material/evidence.
-            if low not in source_text:
-                continue
-        cleaned.append(line)
+        # Remove unsupported predictive/expectational clauses sentence-by-sentence.
+        sentences = re.split(r"(?<=[.!?])\\s+", line.strip())
+        kept = []
+        for sentence in sentences:
+            low = sentence.lower()
+            predictive = (
+                ("ожидается" in low or "предполагается" in low or "планируется" in low)
+                and "проект" in low
+                and any(k in low for k in ("рассмотр", "обсужд", "утвержд", "принят", "одобрен"))
+            ) or any(k in low for k in (
+                "проект будет рассмотрен", "проект будет утвержден",
+                "проект будет принят", "проект будет одобрен",
+                "проект рассмотрят", "проект утвердят", "проект примут", "проект одобрят"
+            ))
+            if predictive:
+                # Only keep it if the same substantive claim is explicitly present in source/evidence.
+                if not any(w in source_text for w in ("ожидается", "предполагается", "планируется")):
+                    continue
+            kept.append(sentence)
+        if kept:
+            cleaned.append(" ".join(kept))
     return "\n".join(cleaned).strip()
 
 
