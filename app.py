@@ -756,71 +756,60 @@ def history_detail(chat, number):
         return
 
     ev = item["source"]
-    source_text = _history_source_lines(ev)
     page_title = ((ev.get("pages") or [{}])[0].get("title") or "").strip()
     wiki_extract = _history_wiki_extract(page_title) if page_title and not re.fullmatch(r"\d{4}\s*год(?:а)?", page_title, re.I) else ""
     rw_extract = ((ev.get("ruwiki") or {}).get("extract") or "").strip()
 
-    def clean(text):
-        text = re.sub(r"(?m)^\s*={2,6}\s*(.*?)\s*={2,6}\s*$", r"\1", text or "")
+    def clean_source(text):
+        if not text:
+            return ""
+        text = re.sub(r"(?m)^\s*={2,6}\s*(.*?)\s*={2,6}\s*$", r"\1", text)
         text = re.sub(r"\[\d+\]", "", text)
-        text = re.sub(r"(?i)\b(?:Предыстория|См\. также|Примечания|Литература|Ссылки)\b.*$", "", text)
+        # Remove all section headings and everything from the first auxiliary section onward.
+        text = re.split(r"(?im)\bПредыстория\b|\bСм\. также\b|\bПримечания\b|\bЛитература\b|\bСсылки\b", text, maxsplit=1)[0]
         return re.sub(r"\s+", " ", text).strip()
 
-    base = clean(wiki_extract) or clean(rw_extract) or ev.get("text", "").strip()
+    base = clean_source(wiki_extract) or clean_source(rw_extract) or ev.get("text", "").strip()
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", base) if len(s.strip()) > 25]
 
-    # Fully deterministic: no AI is used for the detailed history article.
-    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", base) if len(s.strip()) > 20]
-    core = " ".join(sentences[:10])
-    if len(core) > 2300:
-        core = core[:2300].rsplit(" ", 1)[0] + "…"
+    # Exclude obvious editorial/commentary sentences; keep only event facts.
+    bad = ("по оценкам нескольких источников", "повлиял лично на президента",
+           "непосредственно вовлечён", "северный поток", "70-летия")
+    safe = [s for s in sentences if not any(x in s.casefold() for x in bad)]
 
-    # Build a clean NOWLY article only from source sentences.
-    detail = (
-        f"📖 {item['year']} — {item['title']}\n\n"
-        f"Что произошло:\n{core}\n"
-    )
+    what = safe[:6]
+    if not what:
+        what = sentences[:4]
+    core = " ".join(what)
+    if len(core) > 2400:
+        core = core[:2400].rsplit(" ", 1)[0] + "…"
 
-    # Add only source-backed continuation if it is present in the first source text.
-    if len(sentences) > 10:
-        later = " ".join(sentences[10:13])
+    detail = f"📖 {item['year']} — {item['title']}\n\nЧто произошло:\n{core}\n"
+
+    # Keep a short continuation only from later source sentences, never from a prehistory section.
+    if len(safe) > 6:
+        later = safe[6:8]
         if later:
-            detail += f"\nЧто было дальше:\n{later}\n"
+            detail += "\nЧто было дальше:\n" + " ".join(later) + "\n"
 
-    # Normalize all source URLs before they reach Telegram.
     urls = []
     for p in ev.get("pages") or []:
-        url = (p.get("url") or "").strip()
+        url = (p.get("url") or "").strip().replace("\\", "")
         if url:
             urls.append("Wikipedia: " + url)
     rw = ev.get("ruwiki") or {}
-    if rw.get("url"):
-        urls.append("Рувики: " + rw["url"].strip())
-    sources = "\n".join(dict.fromkeys(urls))
-    if sources:
-        detail += "\nИсточники:\n" + sources
+    url = (rw.get("url") or "").strip().replace("\\", "")
+    if url:
+        urls.append("Рувики: " + url)
+    if urls:
+        detail += "\nИсточники:\n" + "\n".join(dict.fromkeys(urls))
 
-    # Final safety cleanup: no Markdown link syntax can remain.
-    detail = re.sub(r"\[([^\]]+)\]\((https?://[^\s]+)\)", r"\1: \2", detail)
-    detail = re.sub(r"\[(https?://[^\]]+)\]\([^\n]*\)", r"\1", detail)
+    # Never allow Markdown link syntax to reach Telegram.
+    detail = re.sub(r"\[([^\]]+)\]\(https?://[^\n]+\)", "", detail)
     detail = re.sub(r"\[(https?://[^\]]+)\]", r"\1", detail)
     detail = re.sub(r"\\(?=[-*_=[\]()])", "", detail)
 
-    chunks = []
-    rest = detail.strip()
-    while len(rest) > 3900:
-        cut = rest.rfind("\n\n", 0, 3900)
-        if cut < 1200:
-            cut = rest.rfind("\n", 0, 3900)
-        if cut < 1:
-            cut = 3900
-        chunks.append(rest[:cut].strip())
-        rest = rest[cut:].strip()
-    if rest:
-        chunks.append(rest)
-
-    for part in chunks:
-        send(chat, part)
+    send(chat, detail)
     send(chat, "↩️ Вернуться к списку событий", [[{"text": "↩️ К событиям", "callback_data": "hist_back"}]])
 def world_keyboard():
     return [
