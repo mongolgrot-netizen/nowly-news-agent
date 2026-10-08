@@ -265,8 +265,15 @@ def setup_webhook():
 
 def send(chat, text, buttons=None):
     text = str(text).replace('\\n', '\n')
-    # Last-mile Telegram sanitizer. Do not rely on the model or Markdown parser.
-    text = re.sub(r"\[([^\]]+)\]\((https?://[^\n]+)\)", lambda m: m.group(1) + ": " + m.group(2).rstrip(")"), text)
+    # Final Telegram cleanup. Source lines are normalized separately because
+    # Wikipedia URLs may contain parentheses and escaped characters.
+    def clean_line(line):
+        if "[" in line and "](" in line:
+            m = re.search(r"\[([^\]]+)\]\(", line)
+            if m and m.group(1).startswith(("http://", "https://")):
+                line = line[:m.start()] + m.group(1)
+        return line
+    text = "\n".join(clean_line(line) for line in text.split("\n"))
     text = re.sub(r"\[(https?://[^\]]+)\]", r"\1", text)
     text = re.sub(r"\\(?=[-*])", "", text)
     text = re.sub(r"(?m)^\s*[-*]\s+", "- ", text)
@@ -827,9 +834,12 @@ def history_detail(chat, number):
             detail += "\n\nИсточники:\n" + clean_sources
 
     if not detail:
+        # If Groq returns an empty/too-short answer, build the article from
+        # the encyclopedia extract instead of repeating the calendar phrase.
+        fallback_body = wiki_extract or rw_extract or ev.get("text", "")
         detail = (
             f"📖 {item['year']} — {item['title']}\n\n"
-            f"{ev['text']}\n\n"
+            f"{fallback_body.strip()}\n\n"
             f"Источники:\n{source_text or 'Wikimedia / Wikipedia'}"
         )
 
