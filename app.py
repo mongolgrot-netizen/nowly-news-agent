@@ -792,7 +792,8 @@ def search_related_news(target, max_items=8):
                     if not any(a in low for a in names):
                         continue
                 candidate = (t, l, sm)
-                if story_relevance(target, candidate) < 3:
+                relevance = story_relevance(target, candidate)
+                if relevance < (2 if legal_story else 3):
                     continue
                 seen.add(key)
                 # Preserve the publisher name explicitly. Google News often wraps
@@ -1137,7 +1138,7 @@ def process_news(chat, category="news", region=None):
         data = json.loads(match.group(0)) if match else {}
         status = data.get("status", "single_source")
         recommendation = data.get("recommendation", "hold")
-        major_domains = ("reuters.", "apnews.", "bbc.", "npr.", "theguardian.", "dw.", "aljazeera.", "france24.")
+        major_domains = ("reuters.", "apnews.", "bbc.", "npr.", "theguardian.", "dw.", "aljazeera.", "france24.", "interfax.ru", "1prime.ru", "garant.ru", "consultant.ru", "regulation.gov.ru")
         major_sources = set()
         for x in related:
             low = f"{x[0]} {x[1]} {x[2]}".lower()
