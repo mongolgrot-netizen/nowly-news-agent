@@ -794,6 +794,13 @@ def history_detail(chat, number):
         text = re.sub(r"(?m)^\s*={2,6}\s*(.*?)\s*={2,6}\s*$", r"\1", text)
         text = re.sub(r"\[\d+\]", "", text)
         text = re.sub(r"\{\{[^{}]+\}\}", "", text)
+        # Обрезаем служебные/справочные разделы Wikipedia и не переносим
+        # в NOWLY длинную предысторию, которая не относится к самому событию.
+        text = re.split(
+            r"(?i)\bПредыстория\b|\bСм\. также\b|\bПримечания\b|\bЛитература\b|\bСсылки\b",
+            text,
+            maxsplit=1
+        )[0]
         text = re.sub(r"\s+", " ", text)
         return text.strip()
 
@@ -817,6 +824,7 @@ def history_detail(chat, number):
         "непосредственно вовлечён",
         "северный поток",
         "70-летия",
+        "согласно заявлениям местных властей, проезд грузовых автомобилей запрещён",
     )
     safe = [s for s in sentences if not any(x in s.casefold() for x in bad)]
 
