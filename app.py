@@ -752,92 +752,107 @@ def history_detail(chat, number):
 
     ev = item["source"]
     source_text = _history_source_lines(ev)
-    wiki_extract = ""
     page_title = ((ev.get("pages") or [{}])[0].get("title") or "").strip()
-    if page_title and not re.fullmatch(r"\d{4}\s*год(?:а)?", page_title, re.I):
+    wiki_extract = ""
+    if page_title and not re.fullmatch(r"d{4}\s*год(?:а)?", page_title, re.I):
         wiki_extract = _history_wiki_extract(page_title)
     rw_extract = ((ev.get("ruwiki") or {}).get("extract") or "").strip()
+
+    # Build a compact evidence dossier instead of sending a huge encyclopedia
+    # article to the editor. This prevents NOWLY from copying long sections.
+    def compact_extract(text, limit=7000):
+        if not text:
+            return ""
+        text = re.sub(r"(?m)^\s*={2,6}\s*(.*?)\s*={2,6}\s*$", r"\1", text)
+        text = re.sub(r"\[\d+\]", "", text)
+        text = re.sub(r"\s+", " ", text).strip()
+        return text[:limit]
+
     evidence = {
         "calendar_event": ev.get("text", ""),
-        "wikipedia_article_extract": wiki_extract,
-        "ruwiki_article_extract": rw_extract,
-        "sources": source_text
+        "wikipedia": compact_extract(wiki_extract),
+        "ruwiki": compact_extract(rw_extract),
     }
-    detail_prompt = f"""Ты исторический редактор Telegram-канала NOWLY.
-Подготовь подробный материал только по ОДНОМУ событию.
+
+    detail_prompt = f"""Ты редактор исторической рубрики Telegram-канала NOWLY.
+
+Подготовь короткий самостоятельный исторический материал по одному событию.
+Это НЕ пересказ Wikipedia и НЕ копирование энциклопедической статьи.
 
 Дата: {cache["date"]}
 Охват: {_history_scope_text(cache["scope"], cache.get("region"))}
-Год: {item["year"]}
-Название: {item["title"]}
+Год события: {item["year"]}
+Название события: {item["title"]}
 
-КРИТИЧЕСКОЕ ПРАВИЛО: НЕ ДОБАВЛЯЙ ФАКТЫ ОТ СЕБЯ.
-Используй только сведения из блока «ИСХОДНЫЕ ДАННЫЕ».
-Энциклопедический текст Wikipedia/Ruwiki можно использовать для подробного
-изложения, но только в пределах прямо написанных там фактов.
-Запрещено добавлять сведения из памяти модели или внешних знаний.
-Запрещены фразы «по оценкам», «по мнению», «оказал влияние на», «был
-непосредственно вовлечён», «стал символом», «имел значение» и подобные
-интерпретации, если они не сформулированы прямо в исходных данных.
-Не добавляй новые причины, мотивы, участников, должности, цифры, последствия,
-ответственность, политические оценки или связь с другими событиями.
-Если факт спорный, указывай его только с атрибуцией, как она дана в источнике.
-Если сведений мало — честно дай короткий материал.
+ГЛАВНОЕ ПРАВИЛО:
+Используй только факты из ИСХОДНЫХ ДАННЫХ.
+Не используй знания из памяти модели.
+Не добавляй сведения, которых нет в исходных данных.
+Не копируй предложения из источника дословно.
+
+ЗАДАЧА:
+Сделай понятный материал для обычного читателя Telegram.
+Нужно ответить прежде всего на вопросы:
+1. Что произошло?
+2. Когда и где это произошло?
+3. Каковы подтверждённые последствия?
+4. Что произошло непосредственно после события?
+
+СТРОГО НЕ ДОБАВЛЯЙ:
+- политические оценки;
+- предположения о мотивах;
+- сведения о влиянии события на политиков;
+- фразы «по оценкам», если конкретная оценка не дана в источнике;
+- связь с другими событиями, если она не нужна для понимания самого события;
+- длинную предысторию;
+- разделы Wikipedia «Предыстория», «Версии», «Оценки», «Последствия» целиком;
+- информацию, которой нет в исходных данных.
 
 ФОРМАТ:
+
 📖 {item["year"]} — {item["title"]}
 
 Что произошло:
-2–4 абзаца с подтверждёнными фактами.
+2–3 коротких абзаца.
 
-Контекст:
-только если он прямо подтверждён исходными данными. Не создавай этот раздел,
-если контекст не нужен для понимания события.
+Ключевые факты:
+• 3–6 конкретных фактов.
 
-Факты:
-только конкретные сведения из исходных данных, без дополнений.
+Что было дальше:
+1 короткий абзац, только если продолжение подтверждено источниками.
 
-Итог:
-только подтверждённый результат события; если его нет в источниках, раздел не добавляй.
-
-Источники:
-{source_text}
-
-Не используй Markdown-разметку, обратные слэши перед дефисами и квадратные скобки для ссылок. Не добавляй раздел «Источники» и не выводи URL в тексте статьи — NOWLY добавит источники автоматически. Используй URL только как источник для проверки фактов.
-Если в исходных данных недостаточно информации для раздела — НЕ создавай этот раздел.
-Не ставь тире-заглушки и не повторяй одно и то же предложение в нескольких разделах.
-Не добавляй служебных предупреждений.
+Не добавляй раздел «Источники» — NOWLY добавит его автоматически.
+Не используй Markdown, MediaWiki, квадратные скобки, обратные слэши или URL.
+Не повторяй заголовок после него.
+Не используй слова «согласно Wikipedia» или «энциклопедия».
 
 ИСХОДНЫЕ ДАННЫЕ:
-{json.dumps(evidence, ensure_ascii=False)[:22000]}
+{json.dumps(evidence, ensure_ascii=False)}
 """
 
     try:
-        detail = groq(detail_prompt, 0.05, 2200).strip()
+        detail = groq(detail_prompt, 0.05, 1500).strip()
     except Exception as ex:
         print("HISTORY DETAIL AI:", repr(ex))
         detail = ""
 
-    # Sources are rendered by NOWLY itself. This prevents the model from
-    # returning raw Markdown links that Telegram displays literally.
-    if detail:
-        detail = re.sub(r"\n?Источники:\s*[\s\S]*$", "", detail, flags=re.I).strip()
-        detail = _history_clean_ai(detail)
-        if source_text:
-            # Keep source URLs outside the AI text and never let Markdown
-            # link syntax leak into Telegram.
-            clean_sources = _history_clean_ai(source_text)
-            detail += "\n\nИсточники:\n" + clean_sources
+    detail = _history_clean_ai(detail) if detail else ""
 
-    if not detail:
-        # If Groq returns an empty/too-short answer, build the article from
-        # the encyclopedia extract instead of repeating the calendar phrase.
-        fallback_body = wiki_extract or rw_extract or ev.get("text", "")
-        detail = (
-            f"📖 {item['year']} — {item['title']}\n\n"
-            f"{fallback_body.strip()}\n\n"
-            f"Источники:\n{source_text or 'Wikimedia / Wikipedia'}"
-        )
+    # Guard against an editor failure: use the calendar fact rather than
+    # dumping a long encyclopedia extract into Telegram.
+    if not detail or len(detail) < 180:
+        fallback = ev.get("text", "").strip()
+        detail = f"📖 {item['year']} — {item['title']}\n\nЧто произошло:\n{fallback}"
+
+    # Never let a model-generated source block or MediaWiki headings leak out.
+    detail = re.sub(r"(?is)\n?Источники:\s*.*$", "", detail).strip()
+    detail = re.sub(r"(?m)^\s*={2,6}\s*(.*?)\s*={2,6}\s*$", r"\1", detail)
+    detail = re.sub(r"(?m)^\s*(Предыстория|См\. также|Примечания|Литература|Ссылки)\s*$", "", detail, flags=re.I)
+    detail = re.sub(r"\n{3,}", "\n\n", detail).strip()
+
+    if source_text:
+        # Append sources ourselves, never through the AI.
+        detail += "\n\nИсточники:\n" + source_text
 
     chunks = []
     rest = detail.strip()
