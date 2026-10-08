@@ -753,6 +753,11 @@ def search_related_news(target, max_items=8):
                     if not any(a in low for a in names):
                         continue
                 seen.add(key)
+                # Preserve the publisher name explicitly. Google News often wraps
+                # publisher links, so the RSS <source> field is more reliable than URL.
+                publisher_label = source_name or (expected_source[1] if expected_source else "")
+                if publisher_label:
+                    sm = f"[Редакция: {publisher_label}] {sm}".strip()
                 out.append((t,l,sm))
                 if expected_source:
                     publisher_counts[expected_source[1]] = publisher_counts.get(expected_source[1], 0) + 1
@@ -956,6 +961,12 @@ def process_news(chat, category="news", region=None):
                 merged.append(item)
         related = merged[:10]
 
+        # Make publisher evidence explicit for the AI editor.
+        evidence_text = " ".join(f"{x[0]} {x[2]}" for x in related).lower()
+        joint_publishers = []
+        if "npr" in evidence_text and "bbc" in (f"{title} {summary} " + evidence_text).lower():
+            joint_publishers = ["BBC", "NPR"]
+
         source_lines = [(title, link)] + [(x[0], x[1]) for x in related[:10]]
         material = "\n\n".join(
             f"[{i}] {x[0]}\nИсточник: {x[1]}\nОписание: {x[2][:500]}"
@@ -990,6 +1001,9 @@ def process_news(chat, category="news", region=None):
 
 Материалы:
 {material}
+
+Прямой признак совместного расследования:
+{", ".join(joint_publishers) if joint_publishers else "не обнаружен"}
 """
         prompt += """
 Дополнительное правило фактчека:
@@ -998,6 +1012,8 @@ def process_news(chat, category="news", region=None):
 - Если два или более крупных независимых СМИ сообщают об одном и том же событии, это минимум partial_confirmed; если ключевой факт совпадает — confirmed.
 - Не считай перепечатку, агрегатор или материал, который просто ссылается на исходное расследование, независимым подтверждением.
 - Совместное расследование двух редакций — отдельный статус joint_investigation, а не single_source.
+- Если в материалах явно указаны BBC и NPR как участники одного расследования, а исходный материал описывает их совместную работу, status=joint_investigation даже если третьего независимого подтверждения нет.
+- Если редакция указана в поле "[Редакция: ...]", учитывай это как идентификатор источника при оценке независимости.
 """
         raw = groq(prompt, 0.1, 650)
         match = re.search(r"\{.*\}", raw, re.S)
