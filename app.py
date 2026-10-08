@@ -679,6 +679,11 @@ def search_related_news(target, max_items=10):
         if w not in stop and w not in distinctive:
             distinctive.append(w)
     distinctive = distinctive[:14]
+    # Explicitly search likely co-publishers for investigative stories.
+    if any(x in raw_text for x in ("bbc", "британск", "би-би-си")):
+        base_queries.insert(0, "NPR BBC " + " ".join(distinctive[:5]))
+    if "npr" in raw_text:
+        base_queries.insert(0, "NPR BBC " + " ".join(distinctive[:5]))
     proper = re.findall(r"\b(?:RAF|Fairford|US|UK|No10|BBC|AP|Reuters|Trump|London|Ukraine|Russia|NATO|Iran|Israel)\b", title, re.I)
     proper = list(dict.fromkeys(proper))
     base_queries = []
@@ -695,6 +700,11 @@ def search_related_news(target, max_items=10):
 
     publishers = [("reuters.com","Reuters"),("apnews.com","AP"),("bbc.com","BBC"),("bbc.co.uk","BBC"),("news.sky.com","Sky News"),("theguardian.com","The Guardian"),("itv.com","ITV News"),("aljazeera.com","Al Jazeera"),("dw.com","DW"),("france24.com","France 24"),("npr.org","NPR")]
     queries = []
+    # Check BBC/NPR co-publishing first so the small result budget is not consumed by duplicates.
+    for domain, publisher_name in publishers:
+        if publisher_name in ("NPR", "BBC"):
+            for q in base_queries[:2]:
+                queries.append((f"site:{domain} {q}", (domain, publisher_name)))
     for domain, publisher_name in publishers:
         for q in base_queries[:2]:
             queries.append((f"site:{domain} {q}", (domain, publisher_name)))
@@ -953,7 +963,7 @@ def process_news(chat, category="news", region=None):
 Проверь, относится ли это к одному событию. Если есть подтверждение в нескольких независимых источниках, отметь подтвержденные факты. Telegram-публикации считай сигналом/первоисточником, но не доказательством сами по себе.
 
 Верни строго JSON:
-{{"status":"confirmed|partial_confirmed|attributed|conflict|single_source",
+{{"status":"confirmed|partial_confirmed|joint_investigation|attributed|conflict|single_source",
 "recommendation":"publish|hold",
 "reason":"кратко",
 "telegram_first":true,
@@ -962,7 +972,9 @@ def process_news(chat, category="news", region=None):
 
 Правила:
 - Не придумывай.
-- Если независимого подтверждения нет — recommendation=hold.
+- Если независимого подтверждения нет — recommendation=hold, КРОМЕ явно обозначенного эксклюзивного или совместного расследования крупного СМИ.
+- Если основной материал является совместным расследованием BBC/NPR или другого явно указанного тандема редакций, используй status=joint_investigation.
+- Для joint_investigation можно recommendation=publish, но обязательно укажи, что это расследование редакций, а не независимо установленный факт.
 - Не называй заявление фактом.
 - Если источники расходятся — recommendation=hold.
 - Пост 2-3 коротких абзаца, нейтральный заголовок с одним эмодзи.
@@ -978,6 +990,8 @@ def process_news(chat, category="news", region=None):
 - Считай источники независимыми, если это разные редакции/домены, даже если формулировки отличаются.
 - Для англоязычных мировых новостей не требуй совпадения слов в заголовках: сопоставляй место, объект, участников и последовательность событий.
 - Если два или более крупных независимых СМИ сообщают об одном и том же событии, это минимум partial_confirmed; если ключевой факт совпадает — confirmed.
+- Не считай перепечатку, агрегатор или материал, который просто ссылается на исходное расследование, независимым подтверждением.
+- Совместное расследование двух редакций — отдельный статус joint_investigation, а не single_source.
 """
         raw = groq(prompt, 0.1, 650)
         match = re.search(r"\{.*\}", raw, re.S)
@@ -987,6 +1001,7 @@ def process_news(chat, category="news", region=None):
         labels = {
             "confirmed":"🟢 подтверждено",
             "partial_confirmed":"🟠 частично подтверждено",
+            "joint_investigation":"🟡 совместное расследование СМИ",
             "attributed":"🟡 заявление / атрибуция",
             "conflict":"🔴 источники расходятся",
             "single_source":"⚪ один источник"
