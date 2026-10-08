@@ -722,6 +722,13 @@ def sanitize_legal_post(post, category, title="", summary="", evidence=""):
 
             is_blocked = any(p in low for p in blocked_phrases)
 
+            if not is_blocked and any(p in low for p in legal_inference_phrases):
+                words = [w for w in re.sub(r"[^а-яё0-9 ]+", " ", low).split() if len(w) >= 5]
+                source_words = set(re.sub(r"[^а-яё0-9 ]+", " ", source_text).split())
+                overlap = sum(1 for w in set(words) if w in source_words)
+                if overlap < 4:
+                    is_blocked = True
+
             # Generic predictive wording is also unsafe for legal news unless
             # the source itself contains a very close formulation.
             if (
