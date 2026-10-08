@@ -767,6 +767,8 @@ def search_related_news(target, max_items=8):
         base_queries.insert(2, "Минцифры проект постановления почтовая система")
     if legal_story:
         publishers += [("interfax.ru","Interfax"),("1prime.ru","ПРАЙМ"),("garant.ru","ГАРАНТ"),("consultant.ru","КонсультантПлюс"),("regulation.gov.ru","regulation.gov.ru")]
+    if any(k in raw_text for k in ("банк россии", "системно значим", "правительств", "президент", "указ", "госдум", "государственная дума", "министерств", "ведомств")):
+        publishers += [("cbr.ru","Банк России"),("government.ru","Правительство РФ"),("kremlin.ru","Кремль"),("duma.gov.ru","Госдума")]
     queries = []
     # Check BBC/NPR co-publishing first so the small result budget is not consumed by duplicates.
     for domain, publisher_name in publishers:
@@ -822,7 +824,11 @@ def search_related_news(target, max_items=8):
                         "1prime.ru": ["прайм", "1prime"],
                         "garant.ru": ["гарант", "garant"],
                         "consultant.ru": ["консультант", "consultant"],
-                        "regulation.gov.ru": ["regulation.gov.ru"]
+                        "regulation.gov.ru": ["regulation.gov.ru"],
+                        "cbr.ru": ["банк россии", "cbr.ru", "центральный банк"],
+                        "government.ru": ["правительство россии", "government.ru", "правительство"],
+                        "kremlin.ru": ["кремль", "kremlin.ru", "президент россии"],
+                        "duma.gov.ru": ["госдума", "duma.gov.ru", "государственная дума"]
                     }
                     names = aliases.get(expected_domain, [expected_name.lower()])
                     if not any(a in low for a in names):
@@ -1010,6 +1016,7 @@ def ai_post(title, link, summary="", category="news", fact=None, sources=None):
     return groq(prompt, 0.3, 450)
 
 SEEN_STORIES = set()
+ACTIVE_PROCESSING = set()
 
 def rank_news_candidates(items, category="news"):
     """Free deterministic editorial ranking; no extra AI call."""
@@ -1048,10 +1055,20 @@ def verify_russian_story_direct(target, category="russia"):
     raw = f"{title} {summary}".lower()
     if category not in ("russia", "laws", "kremlin", "russia_tech"):
         return []
-    if not any(k in raw for k in ("проект", "постанов", "правительств", "минцифры", "гарант", "электронн", "закон", "госдум", "указ")):
+    official_story = any(k in raw for k in ("банк россии", "центральный банк", "системно значим", "правительств", "президент", "указ", "госдум", "государственная дума", "министерств", "ведомств", "закон", "постанов", "проект", "минцифры", "госуслуг", "гарант", "электронн"))
+    if not official_story:
         return []
-    queries = [title, " ".join(re.findall(r"[а-яё]{5,}", title.lower())[:7]), "проект постановления электронная почтовая система ГАРАНТ"]
-    publishers = [("Interfax", ("интерфакс","interfax")), ("ТАСС", ("тасс","tass")), ("РИА Новости", ("риа новости","ria")), ("РБК", ("рбк","rbc")), ("Коммерсантъ", ("коммерсант","kommersant")), ("Ведомости", ("ведомости","vedomosti")), ("ГАРАНТ", ("гарант","garant")), ("КонсультантПлюс", ("консультант","consultant"))]
+    queries = [title, " ".join(re.findall(r"[а-яё]{5,}", title.lower())[:9]), "Банк России федеральные новости официальный"]
+    publishers = [
+        ("Interfax", ("интерфакс","interfax")), ("ТАСС", ("тасс","tass")),
+        ("РИА Новости", ("риа новости","ria")), ("РБК", ("рбк","rbc")),
+        ("Коммерсантъ", ("коммерсант","kommersant")), ("Ведомости", ("ведомости","vedomosti")),
+        ("ГАРАНТ", ("гарант","garant")), ("КонсультантПлюс", ("консультант","consultant")),
+        ("Банк России", ("банк россии","cbr.ru","центральный банк")),
+        ("Правительство РФ", ("правительство россии","government.ru","правительство")),
+        ("Кремль", ("кремль","kremlin.ru","президент россии")),
+        ("Госдума", ("госдума","duma.gov.ru","государственная дума")),
+    ]
     out, seen = [], set()
     for q in queries:
         url = "https://news.google.com/rss/search?q=" + requests.utils.quote(q) + "&hl=ru&gl=RU&ceid=RU:ru"
@@ -1071,7 +1088,7 @@ def verify_russian_story_direct(target, category="russia"):
                 if len(out) >= 10: return out
         except Exception as e: print("DIRECT RU VERIFY ERROR:", repr(e))
     return out
-def process_news(chat, category="news", region=None):
+def _process_news(chat, category="news", region=None):
     category_name = CATEGORIES.get(category, "📰 Новости")
     scope = f" • {region}" if region else ""
     send(chat, f"⚡ NOWLY: ищу свежие материалы — {category_name}{scope}...")
@@ -1320,6 +1337,18 @@ def process_news(chat, category="news", region=None):
         buttons = [[{"text":"❌ Отклонить","callback_data":"no"}]]
 
     send(chat, post, buttons)
+
+
+def process_news(chat, category="news", region=None):
+    key = (str(chat), str(category), str(region or ""))
+    if key in ACTIVE_PROCESSING:
+        send(chat, "⏳ NOWLY уже обрабатывает этот запрос. Дождись результата.")
+        return
+    ACTIVE_PROCESSING.add(key)
+    try:
+        return _process_news(chat, category, region)
+    finally:
+        ACTIVE_PROCESSING.discard(key)
 
 def handle_update(u):
     if "message" in u:
