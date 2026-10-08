@@ -644,6 +644,26 @@ def select_news(items, category="news", region=None):
     return [items[i] for i in selected[:1]]
 
 
+
+def story_relevance(target, item):
+    """Free deterministic check that two RSS items describe the same event."""
+    if not target or not item:
+        return 0
+    a=f"{target[0]} {target[2]}".lower()
+    b=f"{item[0]} {item[2]}".lower()
+    stop={"который","которая","которые","после","перед","этого","также","сообщил","сообщила","сообщили","новости","смерть","умерла","умер","скончалась","скончался","today","news","reports","reported","says","said","the","and","from","with","after"}
+    wa=set(re.findall(r"[а-яёa-z0-9]{4,}",a))-stop
+    wb=set(re.findall(r"[а-яёa-z0-9]{4,}",b))-stop
+    overlap=len(wa & wb)
+    na={x.lower() for x in re.findall(r"\b[A-ZА-ЯЁ][A-Za-zА-ЯЁа-яё-]{2,}\b",target[0])}
+    nb={x.lower() for x in re.findall(r"\b[A-ZА-ЯЁ][A-Za-zА-ЯЁа-яё-]{2,}\b",item[0])}
+    names=len(na & nb)
+    if names>=2: return 5
+    if names==1 and overlap>=2: return 4
+    if overlap>=4: return 4
+    if overlap>=3: return 3
+    return 0
+
 def related_items(target, items, max_items=5):
     # Compare title + summary, not title only.
     text_a = f"{target[0]} {target[2]}".lower()
@@ -662,8 +682,9 @@ def related_items(target, items, max_items=5):
         text_b = f"{item[0]} {item[2]}".lower()
         words_b = set(re.findall(r"[а-яёa-z0-9]{4,}", text_b)) - stop
         score = len(words_a & words_b)
-        if score:
-            scored.append((score, item))
+        relevance = story_relevance(target, item)
+        if relevance >= 3:
+            scored.append((relevance + score / 100.0, item))
     scored.sort(key=lambda x: x[0], reverse=True)
     return [x[1] for x in scored[:max_items]]
 
@@ -761,6 +782,9 @@ def search_related_news(target, max_items=8):
                     names = aliases.get(expected_domain, [expected_name.lower()])
                     if not any(a in low for a in names):
                         continue
+                candidate = (t, l, sm)
+                if story_relevance(target, candidate) < 3:
+                    continue
                 seen.add(key)
                 # Preserve the publisher name explicitly. Google News often wraps
                 # publisher links, so the RSS <source> field is more reliable than URL.
@@ -1132,11 +1156,19 @@ def process_news(chat, category="news", region=None):
         if recommendation == "hold":
             # Single-source material is not automatically blocked for low-risk
             # obituary/biography/history/science/culture stories from a major outlet.
+            low_risk_text = f"{title} {summary} {post}".lower()
+            low_risk_obituary = any(k in low_risk_text for k in (
+                "dies at", "died at", "has died", "died on", "скончал", "умер", "умерла",
+                "похорон", "некролог", "биография", "памяти"
+            ))
             low_risk_single_source = (
                 status == "single_source"
-                and category in ("history", "russia_tech", "tech", "humor")
+                and (
+                    category in ("history", "russia_tech", "tech", "humor")
+                    or (category == "world" and low_risk_obituary)
+                )
                 and any(domain in (link or "").lower()
-                        for domain in ("bbc.", "reuters.", "apnews.", "npr.", "dw.", "theguardian."))
+                        for domain in ("bbc.", "reuters.", "apnews.", "npr.", "dw.", "theguardian.", "mit.edu"))
             )
             if low_risk_single_source:
                 recommendation = "publish"
