@@ -1,4 +1,5 @@
 import os, html, threading, json, re, time
+from urllib.parse import quote
 from flask import Flask, request, jsonify
 import requests, feedparser
 
@@ -784,51 +785,45 @@ def history_detail(chat, number):
             return ""
         text = re.sub(r"(?m)^\s*={2,6}\s*(.*?)\s*={2,6}\s*$", r"\1", text)
         text = re.sub(r"\[\d+\]", "", text)
-        # Remove all section headings and everything from the first auxiliary section onward.
         text = re.split(r"(?im)\bПредыстория\b|\bСм\. также\b|\bПримечания\b|\bЛитература\b|\bСсылки\b", text, maxsplit=1)[0]
         return re.sub(r"\s+", " ", text).strip()
 
     base = clean_source(wiki_extract) or clean_source(rw_extract) or ev.get("text", "").strip()
     sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", base) if len(s.strip()) > 25]
 
-    # Exclude obvious editorial/commentary sentences; keep only event facts.
     bad = ("по оценкам нескольких источников", "повлиял лично на президента",
            "непосредственно вовлечён", "северный поток", "70-летия")
     safe = [s for s in sentences if not any(x in s.casefold() for x in bad)]
 
-    what = safe[:6]
-    if not what:
-        what = sentences[:4]
+    what = safe[:6] or sentences[:4]
     core = " ".join(what)
     if len(core) > 2400:
         core = core[:2400].rsplit(" ", 1)[0] + "…"
 
     detail = f"📖 {item['year']} — {item['title']}\n\nЧто произошло:\n{core}\n"
 
-    # Keep a short continuation only from later source sentences, never from a prehistory section.
     if len(safe) > 6:
         later = safe[6:8]
         if later:
             detail += "\nЧто было дальше:\n" + " ".join(later) + "\n"
 
-    urls = []
-    for p in ev.get("pages") or []:
-        url = (p.get("url") or "").strip().replace("\\", "")
-        if url:
-            urls.append("Wikipedia: " + url)
+    send(chat, detail.strip())
+
+    # Sources are now Telegram URL buttons. No URL text means no possible Markdown corruption.
+    buttons = []
+    if page_title:
+        wiki_url = "https://ru.wikipedia.org/wiki/" + quote(page_title.replace(" ", "_"), safe="()")
+        buttons.append({"text": "📚 Wikipedia", "url": wiki_url})
+
     rw = ev.get("ruwiki") or {}
-    url = (rw.get("url") or "").strip().replace("\\", "")
-    if url:
-        urls.append("Рувики: " + url)
-    if urls:
-        detail += "\nИсточники:\n" + "\n".join(dict.fromkeys(urls))
+    rw_title = str(rw.get("title") or page_title).strip()
+    if rw_title:
+        rw_url = "https://ru.ruwiki.ru/wiki/" + quote(rw_title.replace(" ", "_"), safe="()")
+        buttons.append({"text": "📚 Рувики", "url": rw_url})
 
-    # Never allow Markdown link syntax to reach Telegram.
-    detail = re.sub(r"\[([^\]]+)\]\(https?://[^\n]+\)", "", detail)
-    detail = re.sub(r"\[(https?://[^\]]+)\]", r"\1", detail)
-    detail = re.sub(r"\\(?=[-*_=[\]()])", "", detail)
+    if buttons:
+        send(chat, "Источники:", [buttons])
 
-    send(chat, detail)
     send(chat, "↩️ Вернуться к списку событий", [[{"text": "↩️ К событиям", "callback_data": "hist_back"}]])
 def world_keyboard():
     return [
