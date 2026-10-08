@@ -1130,18 +1130,32 @@ def process_news(chat, category="news", region=None):
             recommendation = "publish"
             data["reason"] = "BBC и NPR действительно ведут совместное расследование. Публикация разрешена с обязательной атрибуцией конкретных утверждений; совместность расследования не означает независимого подтверждения каждой детали."
         labels = {
-            "confirmed":"🟢 подтверждено",
-            "partial_confirmed":"🟠 частично подтверждено",
-            "joint_investigation":"🟡 совместное расследование СМИ",
-            "attributed":"🟡 заявление / атрибуция",
-            "conflict":"🔴 источники расходятся",
-            "single_source":"⚪ один источник"
+            "confirmed": "🟢 подтверждено",
+            "partial_confirmed": "🟡 частично подтверждено",
+            "joint_investigation": "🟡 совместное расследование СМИ",
+            "attributed": "🔵 заявление/атрибуция",
+            "conflict": "🔴 противоречие",
+            "single_source": "⚪ один источник",
         }
-        tg_first = "да" if data.get("telegram_first") else "нет"
-        tg_primary = "да" if data.get("telegram_primary") else "нет"
         rec = "🟢 рекомендовано к публикации" if recommendation == "publish" else "🔴 лучше НЕ публиковать"
-        send(chat, f"🔎 Проверка: {labels.get(status, '⚪ не определено')}\n{rec}\nTelegram первым: {tg_first} • Telegram — основной источник: {tg_primary}\n{str(data.get('reason',''))[:700]}")
+        source_names = []
+        for x in related:
+            m = re.search(r"\[Редакция:\s*([^\]]+)\]", str(x[2]))
+            if m and m.group(1) not in source_names:
+                source_names.append(m.group(1))
+        if not source_names:
+            source_names = [re.sub(r"^www\\.", "", re.sub(r"^https?://", "", link)).split("/")[0]]
+        source_line = " • ".join(source_names[:4])
+        admin_text = f"🔎 Проверка: {labels.get(status, '⚪ не определено')}\\n{rec}\\nИсточники: {source_line}"
+        if tg_first or tg_primary:
+            admin_text += f"\\nTelegram первым: {'да' if tg_first else 'нет'} • основной: {'да' if tg_primary else 'нет'}"
+        reason = str(data.get("reason","")).strip()
+        if reason:
+            admin_text += f"\\n{reason[:500]}"
+        send(chat, admin_text)
         post = str(data.get("post","")).strip()
+        post = re.sub(r"\[\s*(https?://[^\]\s]+)\s*\]", r"\1", post)
+        post = post.replace("\\&", "&")
         if not post:
             # Never expose a foreign-language RSS title in a fallback draft.
             fallback_prompt = f"""Перепиши этот материал как короткую новость на русском языке.
