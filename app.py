@@ -1140,6 +1140,17 @@ def process_news(chat, category="news", region=None):
             status = "confirmed"
             recommendation = "publish"
             data["reason"] = "Материал подтверждён несколькими независимыми крупными СМИ."
+        explicit_publishers = set()
+        publisher_aliases = ("bbc", "reuters", "ap", "npr", "the guardian", "dw", "al jazeera", "france 24")
+        for x in related:
+            txt = f"{x[0]} {x[1]} {x[2]}".lower()
+            for alias in publisher_aliases:
+                if alias in txt:
+                    explicit_publishers.add(alias)
+        if status == "single_source" and len(explicit_publishers) >= 2:
+            status = "confirmed"
+            recommendation = "publish"
+            data["reason"] = "Материал подтверждён несколькими независимыми крупными СМИ."
         if joint_publishers:
             status = "joint_investigation"
             recommendation = "publish"
