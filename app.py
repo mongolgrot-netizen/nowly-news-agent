@@ -939,6 +939,39 @@ def ai_post(title, link, summary="", category="news", fact=None, sources=None):
 """
     return groq(prompt, 0.3, 450)
 
+SEEN_STORIES = set()
+
+def rank_news_candidates(items, category="news"):
+    """Free deterministic editorial ranking; no extra AI call."""
+    scored = []
+    priority = {
+        "bbc": 8, "reuters": 10, "apnews": 10, "associatedpress": 10,
+        "guardian": 7, "npr": 8, "aljazeera": 7, "dw.com": 7,
+        "cnn": 6, "nos.nl": 7, "nytimes": 7
+    }
+    strong = ("breaking", "urgent", "killed", "dies", "dead", "attack",
+              "earthquake", "explosion", "fire", "election", "president",
+              "government", "war", "crisis", "sanctions", "arrest", "missing")
+    weak = ("opinion", "analysis", "podcast", "video", "newsletter", "live blog")
+    for idx, item in enumerate(items):
+        title, link, summary, region_tag = item
+        low = f"{title} {summary}".lower()
+        link_low = (link or "").lower()
+        score = max(0, 30 - idx)  # freshness from RSS order
+        for domain, bonus in priority.items():
+            if domain in link_low:
+                score += bonus
+                break
+        score += sum(3 for word in strong if word in low)
+        score -= sum(3 for word in weak if word in low)
+        if len(title) < 35:
+            score -= 3
+        if len(summary) > 80:
+            score += 2
+        scored.append((score, idx, item))
+    scored.sort(key=lambda x: (-x[0], x[1]))
+    return [x[2] for x in scored]
+
 def process_news(chat, category="news", region=None):
     category_name = CATEGORIES.get(category, "📰 Новости")
     scope = f" • {region}" if region else ""
@@ -949,9 +982,14 @@ def process_news(chat, category="news", region=None):
         return
 
     # Free Groq has a strict TPM limit. Do not run several AI calls per button.
-    # Pick the freshest candidate deterministically, then use one compact AI call
-    # to edit it and assess whether it is safe enough for manual publication.
-    selected = items[:1]
+    # Rank candidates locally first, then use one compact AI call for fact-check/editing.
+    ranked = rank_news_candidates(items, category)
+    fresh = [x for x in ranked if (x[1] or x[0]) not in SEEN_STORIES]
+    if not fresh:
+        fresh = ranked
+    selected = fresh[:1]
+    if selected:
+        SEEN_STORIES.add(selected[0][1] or selected[0][0])
     send(chat, f"🧠 NOWLY: отобран материал: 1 из {len(items)}" + (f"\n🗺 Регион: {region}" if region else ""))
 
     title, link, summary, region_tag = selected[0]
