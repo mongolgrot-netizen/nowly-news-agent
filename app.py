@@ -1010,6 +1010,8 @@ def history_detail(chat, number):
     if edited and validate_editorial(edited, base):
         detail_body = reflow_editorial(edited)
     else:
+        # Если AI не дал качественную редактуру, делаем читаемую версию
+        # непосредственно из проверенного источника.
         # Безопасный fallback: только предложения из проверенного источника.
         parts = ["📌 Что произошло", fallback_main or "Подробное описание события в доступном источнике отсутствует."]
         if fallback_later:
