@@ -427,15 +427,19 @@ def _history_source_lines(ev):
     return "\n".join(dict.fromkeys(lines))
 
 def _history_clean_ai(text):
-    """Remove Markdown links that the model may add despite instructions."""
+    """Normalize AI output for Telegram: no Markdown links or escaped bullets."""
     if not text:
         return ""
-    # Telegram should receive normal text, not Markdown link syntax.
-    # Use a line-level match so Wikipedia URLs containing parentheses are preserved.
-    text = re.sub(r"\[([^\]]+)\]\((https?://.*)\)", r"\1: \2", text)
-    text = re.sub(r"\[?(https?://[^\s\]\)]+)\]?", r"\1", text)
-    text = re.sub(r"(?m)^\s*[-*]\s+", "- ", text)
+    # Convert [label](url) to plain URL text. Handle URLs containing parentheses.
+    text = re.sub(
+        r"\[([^\]]+)\]\((https?://.*)\)",
+        lambda m: f"{m.group(1)}: {m.group(2)}",
+        text
+    )
+    # Remove any remaining Markdown link brackets around URLs.
+    text = re.sub(r"\[(https?://[^\]]+)\]", r"\1", text)
     text = text.replace("\\\\-", "-")
+    text = re.sub(r"(?m)^\s*[-*]\s+", "- ", text)
     return text.strip()
 
 def _history_wiki_extract(title):
@@ -655,6 +659,9 @@ SHORT_SUMMARY — 1 короткое предложение, только фак
                     raw_title = raw_title[:177].rsplit(" ", 1)[0] + "…"
             else:
                 raw_title = page_title
+            # Remove a redundant year suffix from event titles such as
+            # "Подрыв Крымского моста (2022)".
+            raw_title = re.sub(r"\s*\(\d{4}\)\s*$", "", raw_title).strip()
             if not raw_title:
                 raw_title = src["text"][:180].strip()
 
@@ -790,7 +797,7 @@ def history_detail(chat, number):
 Источники:
 {source_text}
 
-Не используй Markdown-разметку, обратные слэши перед дефисами и квадратные скобки для ссылок. URL источников не выводи в тексте статьи: их добавит NOWLY автоматически. Используй URL только как источник для проверки фактов.
+Не используй Markdown-разметку, обратные слэши перед дефисами и квадратные скобки для ссылок. Не добавляй раздел «Источники» и не выводи URL в тексте статьи — NOWLY добавит источники автоматически. Используй URL только как источник для проверки фактов.
 Если в исходных данных недостаточно информации для раздела — НЕ создавай этот раздел.
 Не ставь тире-заглушки и не повторяй одно и то же предложение в нескольких разделах.
 Не добавляй служебных предупреждений.
