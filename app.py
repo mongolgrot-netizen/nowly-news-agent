@@ -265,9 +265,11 @@ def setup_webhook():
 
 def send(chat, text, buttons=None):
     text = str(text).replace('\\n', '\n')
-    text = re.sub(r"\[([^\]]+)\]\((https?://.*)\)", lambda m: f"{m.group(1)}: {m.group(2)}", text)
+    # Last-mile Telegram sanitizer. Do not rely on the model or Markdown parser.
+    text = re.sub(r"\[([^\]]+)\]\((https?://[^\n]+)\)", lambda m: m.group(1) + ": " + m.group(2).rstrip(")"), text)
     text = re.sub(r"\[(https?://[^\]]+)\]", r"\1", text)
-    text = text.replace("\\\\-", "-")
+    text = re.sub(r"\\(?=[-*])", "", text)
+    text = re.sub(r"(?m)^\s*[-*]\s+", "- ", text)
     data = {
         "chat_id": chat,
         "text": text,
